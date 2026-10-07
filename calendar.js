@@ -428,19 +428,20 @@
   const titleEl = h("h1", { class: "month-title" });
   const countEl = h("p", { class: "month-count" });
   const balanceEl = h("div", { class: "balance", "aria-live": "polite" });
+  // month navigation, placed just above the calendar's top-right corner
+  const navEl = h("div", { class: "nav-buttons" },
+    h("button", { type: "button", "aria-label": "이전 달", onclick: () => move(-1) }, "‹"),
+    h("button", {
+      type: "button",
+      onclick: () => {
+        state.year = now.getFullYear(); state.month = now.getMonth(); state.selected = toWeekday(today); render();
+      },
+    }, "오늘"),
+    h("button", { type: "button", "aria-label": "다음 달", onclick: () => move(1) }, "›"),
+  );
   const toolbarEl = h("header", { class: "toolbar" },
     h("div", { class: "month-nav" },
       titleEl,
-      h("div", { class: "nav-buttons" },
-        h("button", { type: "button", "aria-label": "이전 달", onclick: () => move(-1) }, "‹"),
-        h("button", {
-          type: "button",
-          onclick: () => {
-            state.year = now.getFullYear(); state.month = now.getMonth(); state.selected = toWeekday(today); render();
-          },
-        }, "오늘"),
-        h("button", { type: "button", "aria-label": "다음 달", onclick: () => move(1) }, "›"),
-      ),
       countEl,
     ),
     h("div", { class: "filters" }, balanceEl, searchInput),
@@ -613,8 +614,11 @@
       );
     }
 
-    bodyEl.replaceChildren(...[meta, legend,
-      h("div", { class: "layout" }, sidebar, calendar, detail)].filter(Boolean));
+    // row above the calendar: type legend on the left, month navigation on the right
+    const calendarHead = h("div", { class: "calendar-head" }, legend ?? h("span"), navEl);
+
+    bodyEl.replaceChildren(...[meta,
+      h("div", { class: "layout" }, sidebar, calendarHead, calendar, detail)].filter(Boolean));
   }
 
   /* ---------- 시작 ---------- */

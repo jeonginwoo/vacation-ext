@@ -81,20 +81,22 @@ button, input, select { font: inherit; color: inherit; }
 }
 .month-title strong { font-weight: 750; color: var(--ink); }
 
-.nav-buttons { display: flex; gap: 4px; align-self: center; }
+/* month navigation: plain text buttons above the calendar's top-right corner */
+.nav-buttons { display: flex; align-items: center; gap: 2px; flex: none; }
 .nav-buttons button {
-  min-width: 34px;
-  height: 32px;
-  padding: 0 10px;
-  border: 1px solid var(--line);
+  min-width: 28px;
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
   border-radius: var(--radius);
-  background: var(--surface);
-  cursor: pointer;
+  background: none;
+  color: var(--ink-soft);
   font-size: 13px;
+  cursor: pointer;
 }
-.nav-buttons button:first-child, .nav-buttons button:last-child { font-size: 18px; line-height: 1; }
-.nav-buttons button:nth-child(2) { font-size: 13px; }
-.nav-buttons button:hover { border-color: var(--ink-faint); }
+.nav-buttons button:first-child, .nav-buttons button:last-child { font-size: 20px; line-height: 1; }
+.nav-buttons button:nth-child(2) { font-weight: 600; color: var(--ink); }
+.nav-buttons button:hover { color: var(--ink); background: color-mix(in srgb, var(--line) 60%, transparent); }
 
 .month-count { margin: 0; color: var(--ink-soft); font-size: 13px; font-variant-numeric: tabular-nums; }
 
@@ -231,7 +233,16 @@ button, input, select { font: inherit; color: inherit; }
 .tag-clear:hover { color: var(--ink-soft); text-decoration: underline; }
 
 /* legend (also a type filter) */
-.legend { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.calendar-head {
+  grid-area: head;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
 .legend-item {
   display: inline-flex;
   align-items: center;
@@ -252,9 +263,16 @@ button, input, select { font: inherit; color: inherit; }
 .layout {
   display: grid;
   grid-template-columns: 252px minmax(0, 1fr) 280px;
-  gap: 16px;
+  grid-template-areas:
+    ".    head ."
+    "side cal  detail";
+  column-gap: 16px;
+  row-gap: 10px;
   align-items: start;
 }
+.layout > .org { grid-area: side; }
+.layout > .calendar { grid-area: cal; }
+.layout > .detail { grid-area: detail; }
 
 /* org-chart sidebar */
 .org {
@@ -506,12 +524,20 @@ button, input, select { font: inherit; color: inherit; }
 
 /* responsive */
 @media (max-width: 1280px) {
-  .layout { grid-template-columns: 244px minmax(0, 1fr); }
-  .detail { grid-column: 2; position: static; }
+  .layout {
+    grid-template-columns: 244px minmax(0, 1fr);
+    grid-template-areas:
+      ".    head"
+      "side cal"
+      "side detail";
+  }
+  .detail { position: static; }
 }
 @media (max-width: 860px) {
-  .layout { grid-template-columns: 1fr; }
-  .detail { grid-column: auto; }
+  .layout {
+    grid-template-columns: 1fr;
+    grid-template-areas: "side" "head" "cal" "detail";
+  }
   .org { position: static; max-height: 260px; }
 }
 
