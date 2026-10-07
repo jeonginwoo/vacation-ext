@@ -426,7 +426,7 @@
     oninput: (ev) => { state.query = ev.target.value; render(); },
   });
   const titleEl = h("h1", { class: "month-title" });
-  const countEl = h("p", { class: "month-count" });
+  const metaEl = h("div", { class: "meta" }); // last collected · refresh · clear
   const balanceEl = h("div", { class: "balance", "aria-live": "polite" });
   // month navigation, placed just above the calendar's top-right corner
   const navEl = h("div", { class: "nav-buttons" },
@@ -439,15 +439,27 @@
     }, "오늘"),
     h("button", { type: "button", "aria-label": "다음 달", onclick: () => move(1) }, "›"),
   );
+  const legendSlot = h("span", { class: "legend-slot" });
   const toolbarEl = h("header", { class: "toolbar" },
-    h("div", { class: "month-nav" },
-      titleEl,
-      countEl,
-    ),
-    h("div", { class: "filters" }, balanceEl, searchInput),
+    h("div", { class: "filters" }, balanceEl),
   );
-  const bodyEl = h("div", { class: "board-body" });
-  app.replaceChildren(toolbarEl, bodyEl);
+  // Row above the three panels:
+  //   above the org chart  -> search
+  //   above the calendar   -> month title + collection status (left), month navigation (right)
+  //   above the day detail -> leave-type checkboxes
+  const searchWrap = h("div", { class: "search-wrap" }, searchInput);
+  const headEl = h("div", { class: "calendar-head" },
+    h("div", { class: "calendar-head-left" }, titleEl, metaEl),
+    navEl,
+  );
+  const legendWrap = h("div", { class: "legend-wrap" }, legendSlot);
+  // The layout and the head row stay mounted; only the sidebar / calendar / detail panels are swapped
+  // on each render, so the search input is never detached while typing.
+  let sideEl = h("aside", { class: "org" });
+  let calEl = h("section", { class: "calendar" });
+  let detailEl = h("aside", { class: "detail" });
+  const layoutEl = h("div", { class: "layout" }, searchWrap, headEl, legendWrap, sideEl, calEl, detailEl);
+  app.replaceChildren(toolbarEl, layoutEl);
 
   function render() {
     const { entries, holidays, updatedAt } = state.data;
@@ -474,18 +486,17 @@
       byDate.set(e.date, list);
     }
     const monthPrefix = `${state.year}-${String(state.month + 1).padStart(2, "0")}`;
-    const monthCount = filtered.filter((e) => e.date.startsWith(monthPrefix)).length;
 
 
     // update the persistent top bar in place (the search input itself is never replaced)
     titleEl.replaceChildren(`${state.year}년 `, h("strong", {}, `${state.month + 1}월`));
-    countEl.textContent = `휴가 ${monthCount}건`;
     if (searchInput.value !== state.query) searchInput.value = state.query;
     renderBalance();
 
     const rf = state.refresh;
     const running = rf?.status === "running" && Date.now() - rf.at < 3 * 60_000;
-    const meta = h("div", { class: "meta" },
+    // collection status lives in the top bar, next to the month title
+    metaEl.replaceChildren(...[
       updatedAt
         ? h("span", {}, `마지막 수집 ${new Date(updatedAt).toLocaleString("ko-KR", {
             month: "long", day: "numeric", hour: "2-digit", minute: "2-digit",
@@ -514,7 +525,7 @@
             },
           }, "수집 데이터 지우기")
         : null,
-    );
+    ].filter(Boolean));
 
     const legend = types.length
       ? h("div", { class: "legend", role: "group", "aria-label": "휴가 구분 필터" },
@@ -614,11 +625,10 @@
       );
     }
 
-    // row above the calendar: type legend on the left, month navigation on the right
-    const calendarHead = h("div", { class: "calendar-head" }, legend ?? h("span"), navEl);
-
-    bodyEl.replaceChildren(...[meta,
-      h("div", { class: "layout" }, sidebar, calendarHead, calendar, detail)].filter(Boolean));
+    legendSlot.replaceChildren(...(legend ? [legend] : []));
+    sideEl.replaceWith(sidebar); sideEl = sidebar;
+    calEl.replaceWith(calendar); calEl = calendar;
+    detailEl.replaceWith(detail); detailEl = detail;
   }
 
   /* ---------- 시작 ---------- */

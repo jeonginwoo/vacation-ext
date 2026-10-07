@@ -65,7 +65,7 @@ button, input, select { font: inherit; color: inherit; }
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 16px 24px;
   margin-bottom: 16px;
 }
@@ -74,7 +74,8 @@ button, input, select { font: inherit; color: inherit; }
 
 .month-title {
   margin: 0;
-  font-size: 30px;
+  font-size: 26px;
+  line-height: 1.2;
   font-weight: 400;
   letter-spacing: -0.02em;
   color: var(--ink-soft);
@@ -113,6 +114,8 @@ button, input, select { font: inherit; color: inherit; }
 /* own leave balance (top bar) */
 .balance { display: flex; align-items: center; gap: 6px; }
 .balance[hidden] { display: none; }
+/* the top bar only holds the balance now; drop it entirely when there is nothing to show */
+.toolbar:has(.balance[hidden]) { display: none; }
 .balance-item {
   display: inline-flex;
   align-items: baseline;
@@ -136,7 +139,7 @@ button, input, select { font: inherit; color: inherit; }
   flex-wrap: wrap;
   align-items: center;
   gap: 4px 12px;
-  margin: -6px 0 14px;
+  margin: 0;
   font-size: 12.5px;
   color: var(--ink-soft);
 }
@@ -233,29 +236,46 @@ button, input, select { font: inherit; color: inherit; }
 .tag-clear:hover { color: var(--ink-soft); text-decoration: underline; }
 
 /* legend (also a type filter) */
-.legend { display: flex; flex-wrap: wrap; gap: 6px; }
+.legend { display: flex; flex-wrap: wrap; gap: 2px 6px; }
 
+/* row above the panels: search | month title + status ... navigation | leave-type checkboxes */
+.search-wrap { grid-area: search; }
 .calendar-head {
   grid-area: head;
   display: flex;
-  align-items: center;
+  flex-wrap: wrap;
+  align-items: flex-end;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px 16px;
   min-width: 0;
+}
+.calendar-head-left { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; min-width: 0; }
+.legend-wrap { grid-area: legend; }
+.legend-slot { display: contents; }
+.layout > .search-wrap, .layout > .calendar-head, .layout > .legend-wrap { align-self: end; }
+#search {
+  width: 100%;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
 }
 .legend-item {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  height: 28px;
-  padding: 0 10px 0 8px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--surface);
-  font-size: 12.5px;
+  gap: 4px;
+  height: 26px;
+  padding: 0 2px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  font-size: 12px;
+  white-space: nowrap;
   cursor: pointer;
 }
-.legend-item .swatch { width: 10px; height: 10px; border-radius: 3px; background: var(--type-color); }
+.legend-item:hover { background: color-mix(in srgb, var(--line) 60%, transparent); }
+.legend-item .swatch { width: 11px; height: 11px; border-radius: 3px; background: var(--type-color); }
 .legend-item[aria-pressed="false"] { color: var(--ink-faint); }
 .legend-item[aria-pressed="false"] .swatch { background: transparent; box-shadow: inset 0 0 0 1.5px var(--ink-faint); }
 
@@ -264,8 +284,8 @@ button, input, select { font: inherit; color: inherit; }
   display: grid;
   grid-template-columns: 252px minmax(0, 1fr) 280px;
   grid-template-areas:
-    ".    head ."
-    "side cal  detail";
+    "search head legend"
+    "side   cal  detail";
   column-gap: 16px;
   row-gap: 10px;
   align-items: start;
@@ -527,16 +547,17 @@ button, input, select { font: inherit; color: inherit; }
   .layout {
     grid-template-columns: 244px minmax(0, 1fr);
     grid-template-areas:
-      ".    head"
-      "side cal"
-      "side detail";
+      "search head"
+      "side   cal"
+      "side   legend"
+      "side   detail";
   }
   .detail { position: static; }
 }
 @media (max-width: 860px) {
   .layout {
     grid-template-columns: 1fr;
-    grid-template-areas: "side" "head" "cal" "detail";
+    grid-template-areas: "search" "side" "head" "cal" "legend" "detail";
   }
   .org { position: static; max-height: 260px; }
 }
@@ -544,8 +565,6 @@ button, input, select { font: inherit; color: inherit; }
 @media (max-width: 720px) {
   .board { padding: 16px 12px 32px; }
   .month-title { font-size: 24px; }
-  .filters, .filters input { width: 100%; }
-  .filters input { flex: 1; }
   .week { min-height: 56px; }
   .day-top { flex-direction: column; gap: 2px; }
   .bar, .more, .holiday-name { display: none; }
