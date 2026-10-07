@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "휴가 캘린더 (ProWorkflow)",
+  "version": "0.4.0",
+  "description": "ProWorkflow 휴가자조회 데이터를 월간 캘린더로 보여줍니다.",
+  "permissions": ["storage", "alarms"],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_title": "휴가 캘린더 열기" },
+  "content_scripts": [
+    {
+      "matches": ["https://runtime-app.powerplatform.com/*", "https://apps.powerapps.com/*"],
+      "js": ["hook.js"],
+      "world": "MAIN",
+      "run_at": "document_start",
+      "all_frames": true
+    },
+    {
+      "matches": ["https://runtime-app.powerplatform.com/*", "https://apps.powerapps.com/*"],
+      "js": ["relay.js"],
+      "run_at": "document_start",
+      "all_frames": true
+    },
+    {
+      "matches": ["https://teams-orgchartweb-gqbcd2hpdgdxegar.koreacentral-01.azurewebsites.net/*"],
+      "js": ["orgchart.js"],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ]
+}
