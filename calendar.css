@@ -542,6 +542,36 @@ button, input, select { font: inherit; color: inherit; }
 .detail-sub { display: flex; flex-direction: column; margin-top: 2px; font-size: 12px; color: var(--ink-soft); }
 .detail-period { font-variant-numeric: tabular-nums; color: var(--ink-faint); }
 
+/* Wide screens: the page itself never scrolls. The board fills the window, and each column
+   handles its own overflow: org chart and day detail scroll independently, the calendar keeps
+   its weeks filling the height and (only if a busy month does not fit) scrolls without a visible
+   scrollbar, with the weekday header pinned. */
+@media (min-width: 1281px) {
+  html, body { height: 100%; overflow: hidden; }
+  .board { height: 100%; display: flex; flex-direction: column; padding-bottom: 20px; }
+  .toolbar { flex: none; }
+  .layout { flex: 1; min-height: 0; grid-template-rows: auto minmax(0, 1fr); }
+  .layout > .org,
+  .layout > .detail {
+    position: static;
+    align-self: start;
+    max-height: 100%;
+    overflow-y: auto;
+    scrollbar-width: thin;
+  }
+  .layout > .calendar {
+    align-self: stretch;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow-y: auto;
+    scrollbar-width: none;
+  }
+  .layout > .calendar::-webkit-scrollbar { display: none; }
+  .calendar .weekday-row { position: sticky; top: 0; z-index: 2; flex: none; background: var(--surface); }
+  .calendar .week { flex: 1 0 auto; min-height: 96px; }
+}
+
 /* responsive */
 @media (max-width: 1280px) {
   .layout {
