@@ -108,6 +108,27 @@ button, input, select { font: inherit; color: inherit; }
 }
 .filters input { width: 200px; }
 
+/* own leave balance (top bar) */
+.balance { display: flex; align-items: center; gap: 6px; }
+.balance[hidden] { display: none; }
+.balance-item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  line-height: 32px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.balance-label { font-size: 12.5px; color: var(--ink-soft); }
+.balance-item strong { font-size: 16px; font-weight: 750; color: var(--accent); }
+.balance-item.long strong { color: #7A4FD0; }
+.balance-total { font-size: 12.5px; color: var(--ink-soft); }
+
 .meta {
   display: flex;
   flex-wrap: wrap;

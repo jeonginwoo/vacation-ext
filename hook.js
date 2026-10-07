@@ -12,6 +12,15 @@
     "UseDate", "Period", "UseYear", "CancelYN"];
   const HOLIDAY_FIELDS = ["ID", "Title", "HolidayDate", "HolidayType"];
 
+  // Leave balance lists (one row per employee). Only the signed-in user's own row is ever kept;
+  // other employees' rows are read in memory to find that row and then discarded.
+  const BALANCE_LISTS = {
+    "01674c22-0fb3-4c8a-9b92-a60a6e54ca1a": "annual",      // annual leave (one row per user per Year)
+    "bbaac026-ede5-4d45-8268-45dd3ec13015": "longService", // long-service leave
+  };
+  const BALANCE_SELECT = "ID,RemainAnnualCount,TotalAnnualCount,UseAnnualCount,UserEmail,Year";
+  let ownEmail = null; // learned from the app's own "UserEmail eq '...'" filters
+
   // Auto refresh: the same list queries the app sends when the leave screen is opened.
   // They are sent from this page with the app's own request headers (kept in memory only).
   const REFRESH_QUERIES = [
@@ -112,6 +121,24 @@
     return { body: parse(text), meta };
   }
 
+  function num(v) { const n = Number(v); return Number.isFinite(n) ? n : null; }
+
+  // keep only the signed-in user's own balance row
+  function handleBalance(listId, rows, via) {
+    const kind = BALANCE_LISTS[listId] ?? (("Year" in rows[0]) ? "annual" : "longService");
+    if (!ownEmail) { diag("balance", { via, kind, skipped: "email unknown" }); return; }
+    const mine = rows.filter((r) => String(r.UserEmail ?? "").toLowerCase() === ownEmail);
+    if (!mine.length) return;
+    const year = String(new Date(Date.now() + 9 * 3600e3).getUTCFullYear());
+    const row = mine.find((r) => String(r.Year ?? "") === year)
+      ?? mine.sort((a, b) => String(b.Year ?? "").localeCompare(String(a.Year ?? "")))[0];
+    const total = num(row.TotalAnnualCount);
+    const remain = num(row.RemainAnnualCount);
+    const used = num(row.UseAnnualCount) ?? (total != null && remain != null ? total - remain : null);
+    post({ kind: "balance", balanceKind: kind, listId, year: row.Year != null ? String(row.Year) : null, total, used, remain });
+    diag("balance", { via, kind });
+  }
+
   function handleResponse(url, body, via, meta) {
     const info = urlInfo(url);
     if (!body || !Array.isArray(body.value)) {
@@ -123,6 +150,7 @@
       return;
     }
     if (body.value.length === 0) return;
+    if ("RemainAnnualCount" in body.value[0]) { handleBalance(info.listId, body.value, via); return; }
     if (!emit(body.value, url, body["@odata.nextLink"], via)) {
       diag("parsed", { via, listId: info.listId, ok: true, kind: null, keys: Object.keys(body.value[0]).slice(0, 15) });
     }
@@ -158,17 +186,25 @@
     if (replayed) return;
     replayed = true;
     const base = templateUrl.slice(0, templateUrl.indexOf("/tables/") + "/tables/".length);
-    let pending = REFRESH_QUERIES.length;
+    const queries = REFRESH_QUERIES.map(([listId, select]) => `${base}${listId}/items?%24select=${encodeURIComponent(select)}&%24top=500`);
+    if (ownEmail) {
+      // own balance only: filtered by the user's email, so other employees' rows are not even requested
+      const filter = encodeURIComponent(`UserEmail eq '${ownEmail.replace(/'/g, "''")}'`);
+      for (const listId of Object.keys(BALANCE_LISTS)) {
+        queries.push(`${base}${listId}/items?%24select=${encodeURIComponent(BALANCE_SELECT)}&%24filter=${filter}&%24top=50`);
+      }
+    }
+    let pending = queries.length;
     let ok = 0;
     const done = () => {
       // small delay so the captured responses reach the extension before the window is closed
-      if (--pending === 0) setTimeout(() => post({ kind: "refresh-done", ok, total: REFRESH_QUERIES.length }), 1500);
+      if (--pending === 0) setTimeout(() => post({ kind: "refresh-done", ok, total: queries.length }), 1500);
     };
-    diag("replay", { count: REFRESH_QUERIES.length });
-    for (const [listId, select] of REFRESH_QUERIES) {
+    diag("replay", { count: queries.length });
+    for (const url of queries) {
       const xhr = new XMLHttpRequest();
       // goes through the patched open/send above, so the response is captured like any other
-      xhr.open("GET", `${base}${listId}/items?%24select=${encodeURIComponent(select)}&%24top=500`);
+      xhr.open("GET", url);
       for (const [k, v] of Object.entries(headers)) {
         try { xhr.setRequestHeader(k, v); } catch {}
       }
@@ -177,9 +213,21 @@
     }
   }
 
+  function learnEmail(url) {
+    try {
+      const f = new URL(url, location.href).searchParams.get("$filter") || "";
+      const m = f.match(/UserEmail eq '([^']+)'/i);
+      if (m && m[1].toLowerCase() !== ownEmail) {
+        ownEmail = m[1].toLowerCase();
+        post({ kind: "me", email: ownEmail });
+      }
+    } catch {}
+  }
+
   const origOpen = XMLHttpRequest.prototype.open;
   XMLHttpRequest.prototype.open = function (method, url) {
     this.__vbUrl = String(url);
+    if (CONNECTOR_RE.test(this.__vbUrl)) learnEmail(this.__vbUrl);
     return origOpen.apply(this, arguments);
   };
   const origSend = XMLHttpRequest.prototype.send;
@@ -271,6 +319,11 @@
 
   // 다른 프레임에서 오는 메시지에도 데이터가 실려 있을 수 있습니다.
   window.addEventListener("message", (ev) => {
+    // own email saved by the extension (sent by relay.js on page load)
+    if (ev.source === window && ev.data && ev.data.__vacationBoardCfg) {
+      if (!ownEmail && typeof ev.data.email === "string") ownEmail = ev.data.email.toLowerCase();
+      return;
+    }
     if (ev.data && ev.data.__vacationBoard) return;
     if (ev.source === window) return;
     sniff(ev.data, "frame-message");

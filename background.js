@@ -105,6 +105,16 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
   if (!msg?.payload) return;
   if (msg.type === "capture") {
     queue = queue.then(() => merge(msg.payload)).catch((err) => console.error(err));
+  } else if (msg.type === "me") {
+    queue = queue.then(() => chrome.storage.local.set({ me: { email: msg.payload.email } }));
+  } else if (msg.type === "balance") {
+    // own leave balance only (annual / longService)
+    const p = msg.payload;
+    queue = queue.then(async () => {
+      const { balance = {} } = await chrome.storage.local.get("balance");
+      balance[p.balanceKind] = { year: p.year, total: p.total, used: p.used, remain: p.remain, at: Date.now() };
+      await chrome.storage.local.set({ balance });
+    }).catch((err) => console.error(err));
   } else if (msg.type === "orgtree") {
     // org chart: keep department structure only (replace with latest)
     queue = queue.then(() => chrome.storage.local.set({

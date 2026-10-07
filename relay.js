@@ -4,12 +4,17 @@ window.addEventListener("message", (event) => {
   const data = event.data;
   if (!data || data.__vacationBoard !== true) return;
   try {
-    const type = data.kind === "diag" ? "diag" : data.kind === "refresh-done" ? "refresh-done" : "capture";
+    const type = ["diag", "refresh-done", "me", "balance"].includes(data.kind) ? data.kind : "capture";
     chrome.runtime.sendMessage({ type, payload: data });
   } catch {
     // 확장이 새로고침된 직후 등에는 무시
   }
 });
+
+// pass the saved own email to the page so the auto refresh can ask for the user's own balance only
+chrome.storage.local.get("me").then(({ me }) => {
+  if (me?.email) window.postMessage({ __vacationBoardCfg: true, email: me.email }, "*");
+}).catch(() => {});
 
 // 최상위 Power Apps 페이지에 진단 요약을 표시해 둡니다 (문제 확인용, 화면에는 안 보임).
 if (window.top === window) {

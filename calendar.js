@@ -130,6 +130,7 @@
     org: null,             // { company, nodes, byCode, children, roots, byName }
     data: { entries: [], holidays: new Map(), updatedAt: null },
     refresh: null,
+    balance: null,          // own leave balance { annual, longService }
     diag: null,
   };
 
@@ -426,6 +427,7 @@
   });
   const titleEl = h("h1", { class: "month-title" });
   const countEl = h("p", { class: "month-count" });
+  const balanceEl = h("div", { class: "balance", "aria-live": "polite" });
   const toolbarEl = h("header", { class: "toolbar" },
     h("div", { class: "month-nav" },
       titleEl,
@@ -441,7 +443,7 @@
       ),
       countEl,
     ),
-    h("div", { class: "filters" }, searchInput),
+    h("div", { class: "filters" }, balanceEl, searchInput),
   );
   const bodyEl = h("div", { class: "board-body" });
   app.replaceChildren(toolbarEl, bodyEl);
@@ -478,6 +480,7 @@
     titleEl.replaceChildren(`${state.year}년 `, h("strong", {}, `${state.month + 1}월`));
     countEl.textContent = `휴가 ${monthCount}건`;
     if (searchInput.value !== state.query) searchInput.value = state.query;
+    renderBalance();
 
     const rf = state.refresh;
     const running = rf?.status === "running" && Date.now() - rf.at < 3 * 60_000;
@@ -616,6 +619,28 @@
 
   /* ---------- 시작 ---------- */
 
+  /* ---------- own leave balance ---------- */
+
+  // 0.5 -> "0.5", 6 -> "6"
+  const fmtDays = (n) => (n == null ? "-" : String(Math.round(n * 100) / 100));
+
+  function renderBalance() {
+    const b = state.balance ?? {};
+    const parts = [];
+    const item = (label, v, cls) => h("span", {
+      class: `balance-item ${cls}`,
+      title: `${v.year ? v.year + "년 · " : ""}부여 ${fmtDays(v.total)}일 · 사용 ${fmtDays(v.used)}일 · 잔여 ${fmtDays(v.remain)}일`,
+    },
+      h("span", { class: "balance-label" }, label),
+      h("strong", {}, fmtDays(v.remain)),
+      h("span", { class: "balance-total" }, `/ ${fmtDays(v.total)}일`));
+    if (b.annual) parts.push(item("내 잔여 연차", b.annual, "annual"));
+    // long-service leave only when the user actually has some
+    if (b.longService && (b.longService.total ?? 0) > 0) parts.push(item("근속연차", b.longService, "long"));
+    balanceEl.replaceChildren(...parts);
+    balanceEl.hidden = parts.length === 0;
+  }
+
   /* ---------- auto refresh ---------- */
 
   const STALE_MS = 60 * 60_000; // refresh automatically when data is older than 1 hour
@@ -641,8 +666,9 @@
   }
 
   async function load() {
-    const store = await chrome.storage.local.get(["vacations", "holidays", "updatedAt", "diag", "orgTree", "refresh"]);
+    const store = await chrome.storage.local.get(["vacations", "holidays", "updatedAt", "diag", "orgTree", "refresh", "balance"]);
     state.refresh = store.refresh ?? null;
+    state.balance = store.balance ?? null;
     state.org = buildOrg(store.orgTree);
     state.data = normalize(store);
     state.diag = store.diag ?? null;

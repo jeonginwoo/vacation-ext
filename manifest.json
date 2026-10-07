@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "휴가 캘린더 (ProWorkflow)",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "ProWorkflow 휴가자조회 데이터를 월간 캘린더로 보여줍니다.",
   "permissions": ["storage", "alarms"],
   "background": { "service_worker": "background.js" },
