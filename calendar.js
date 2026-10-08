@@ -126,9 +126,6 @@
     const btn = h("button", { type: "button", class: `icon-btn ${props.class ?? ""}`.trim(), "aria-label": tip, "data-tip": tip,
       disabled: props.disabled, onclick: props.onclick });
     btn.innerHTML = ICONS[icon];
-    // The button is re-created on every render; start the spin at the phase the clock says it
-    // should be at, so the rotation continues smoothly instead of restarting from 0 each time.
-    if ((props.class ?? "").includes("spinning")) btn.style.setProperty("--spin-delay", `-${Date.now() % 1000}ms`);
     return btn;
   }
 
@@ -444,6 +441,25 @@
   });
   const titleEl = h("h1", { class: "month-title" });
   const metaEl = h("div", { class: "meta" }); // last collected · refresh · clear
+  // The status line is built once and only updated in place: the refresh button is always the
+  // same element, so its spin animation is never interrupted by a re-render.
+  const collectedEl = h("span");
+  const refreshBtn = iconButton("refresh", "휴가 정보 갱신", { onclick: () => requestRefresh() });
+  const failedEl = h("span", { class: "refresh-failed" },
+    "자동으로 받지 못했어요. ",
+    h("a", { href: POWERAPPS_URL, target: "_blank", rel: "noopener" }, "Power Apps"),
+    "에 로그인되어 있는지 확인하고 직접 열어주세요.");
+  const clearDataBtn = iconButton("trash", "수집 데이터 지우기", {
+    class: "danger",
+    onclick: async () => {
+      if (!confirm("수집한 휴가 데이터를 모두 지울까요?")) return;
+      // department selection belongs to the collected org chart, so reset it too
+      state.depts.clear();
+      saveDepts();
+      await chrome.storage.local.clear();
+    },
+  });
+  metaEl.append(collectedEl, refreshBtn, failedEl, clearDataBtn);
   const balanceEl = h("div", { class: "balance", "aria-live": "polite" });
   // month navigation, placed just above the calendar's top-right corner
   const navEl = h("div", { class: "nav-buttons" },
@@ -560,36 +576,20 @@
 
     const rf = state.refresh;
     const running = rf?.status === "running" && Date.now() - rf.at < 3 * 60_000;
-    // collection status lives in the top bar, next to the month title
-    metaEl.replaceChildren(...[
-      updatedAt
-        ? h("span", {}, `마지막 수집 ${new Date(updatedAt).toLocaleString("ko-KR", {
-            month: "long", day: "numeric", hour: "2-digit", minute: "2-digit",
-          })}`)
-        : null,
-      iconButton("refresh", running ? "갱신 중…" : "휴가 정보 갱신", {
-        class: running ? "spinning" : "", disabled: running,
-        onclick: () => requestRefresh(),
-      }),
-      rf?.status === "failed" && !running
-        ? h("span", { class: "refresh-failed" },
-            "자동으로 받지 못했어요. ",
-            h("a", { href: POWERAPPS_URL, target: "_blank", rel: "noopener" }, "Power Apps"),
-            "에 로그인되어 있는지 확인하고 직접 열어주세요.")
-        : null,
-      updatedAt
-        ? iconButton("trash", "수집 데이터 지우기", {
-            class: "danger",
-            onclick: async () => {
-              if (!confirm("수집한 휴가 데이터를 모두 지울까요?")) return;
-              // department selection belongs to the collected org chart, so reset it too
-              state.depts.clear();
-              saveDepts();
-              await chrome.storage.local.clear();
-            },
-          })
-        : null,
-    ].filter(Boolean));
+    // update the status line in place (see collectedEl / refreshBtn above)
+    collectedEl.textContent = updatedAt
+      ? `마지막 수집 ${new Date(updatedAt).toLocaleString("ko-KR", {
+          month: "long", day: "numeric", hour: "2-digit", minute: "2-digit",
+        })}`
+      : "";
+    collectedEl.hidden = !updatedAt;
+    const refreshTip = running ? "갱신 중…" : "휴가 정보 갱신";
+    refreshBtn.disabled = running;
+    refreshBtn.classList.toggle("spinning", running);
+    refreshBtn.dataset.tip = refreshTip;
+    refreshBtn.setAttribute("aria-label", refreshTip);
+    failedEl.hidden = !(rf?.status === "failed" && !running);
+    clearDataBtn.hidden = !updatedAt;
 
     const legend = types.length
       ? h("div", { class: "legend", role: "group", "aria-label": "휴가 구분 필터" },

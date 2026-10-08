@@ -192,7 +192,8 @@ button, input, select { font: inherit; color: inherit; }
 .icon-btn:hover:not(:disabled) { color: var(--accent); background: color-mix(in srgb, var(--line) 60%, transparent); }
 .icon-btn.danger:hover:not(:disabled) { color: var(--holiday); }
 .icon-btn:disabled { color: var(--ink-faint); cursor: default; }
-.icon-btn.spinning svg { animation: spin 1s linear infinite; animation-delay: var(--spin-delay, 0ms); }
+.icon-btn.spinning svg { animation: spin 1s linear infinite; }
+.meta [hidden] { display: none; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .icon-btn.spinning svg { animation: none; } }
 
