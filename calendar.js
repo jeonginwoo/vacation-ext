@@ -237,6 +237,7 @@
     const renderNode = (node) => {
       const kids = org.children.get(node.code) ?? [];
       const depth = depthOf(org, node);
+      const isRoot = depth === 0;
       const open = state.expanded.has(node.code) ? state.expanded.get(node.code) : depth < 2;
       const selected = state.depts.has(node.name);
       const implied = !selected && ancestorSelected(org, node);
@@ -249,16 +250,24 @@
                 onclick: () => { state.expanded.set(node.code, !open); render(); },
               }, open ? "▾" : "▸")
             : h("span", { class: "org-caret-space" }),
-          h("button", {
-            type: "button", class: "org-name",
-            "aria-pressed": String(selected || implied),
-            disabled: implied,
-            title: implied ? "상위 부서가 선택되어 함께 표시 중입니다" : null,
-            onclick: () => toggleDept(node.name),
-          },
-            h("span", { class: "org-check" }),
-            h("span", { class: "org-label" }, node.name),
-            count ? h("span", { class: "org-count" }, count) : null),
+          isRoot
+            // top of the tree (the company): no checkbox, since nothing checked already means "everyone"
+            ? h("button", {
+                type: "button", class: "org-name org-root",
+                onclick: () => { if (kids.length) { state.expanded.set(node.code, !open); render(); } },
+              },
+                h("span", { class: "org-label" }, node.name),
+                count ? h("span", { class: "org-count" }, count) : null)
+            : h("button", {
+                type: "button", class: "org-name",
+                "aria-pressed": String(selected || implied),
+                disabled: implied,
+                title: implied ? "상위 부서가 선택되어 함께 표시 중입니다" : null,
+                onclick: () => toggleDept(node.name),
+              },
+                h("span", { class: "org-check" }),
+                h("span", { class: "org-label" }, node.name),
+                count ? h("span", { class: "org-count" }, count) : null),
         ),
         kids.length && open ? h("ul", { role: "group" }, kids.map(renderNode)) : null,
       );
@@ -460,6 +469,44 @@
   let detailEl = h("aside", { class: "detail" });
   const layoutEl = h("div", { class: "layout" }, searchWrap, headEl, legendWrap, sideEl, calEl, detailEl);
 
+  /* ---------- site access check ----------
+     If Chrome's "site access" for this extension is off (e.g. "on click"), the content scripts never
+     run and nothing gets collected. Check it whenever the calendar opens and explain how to fix it. */
+  const ACCESS_SITES = [
+    { label: "Power Apps(휴가 정보)", origins: ["https://apps.powerapps.com/*", "https://runtime-app.powerplatform.com/*"] },
+    { label: "Teams 조직도", origins: ["https://teams-orgchartweb-gqbcd2hpdgdxegar.koreacentral-01.azurewebsites.net/*"] },
+  ];
+  const accessEl = h("div", { class: "access-warning", role: "alert" });
+  accessEl.hidden = true;
+
+  async function checkAccess() {
+    const missing = [];
+    for (const site of ACCESS_SITES) {
+      try {
+        if (!(await chrome.permissions.contains({ origins: site.origins }))) missing.push(site);
+      } catch { /* cannot tell: assume fine */ }
+    }
+    if (!missing.length) { accessEl.hidden = true; accessEl.replaceChildren(); return; }
+    accessEl.hidden = false;
+    accessEl.replaceChildren(
+      h("strong", {}, "사이트 액세스가 꺼져 있어요: "),
+      missing.map((m) => m.label).join(", "),
+      h("span", { class: "access-help" },
+        " — 수집이 되지 않습니다. 오른쪽 버튼으로 허용하거나, chrome://extensions → 휴가 캘린더 → 세부정보 → 사이트 액세스를 \"특정 사이트에서\"로 바꿔주세요. 바꾼 뒤에는 Power Apps / Teams 탭을 새로고침하세요."),
+      h("button", {
+        type: "button", class: "access-grant",
+        onclick: async () => {
+          try {
+            await chrome.permissions.request({ origins: missing.flatMap((m) => m.origins) });
+          } catch { /* not allowed from here: the text above explains the manual way */ }
+          checkAccess();
+        },
+      }, "권한 허용"),
+    );
+  }
+  chrome.permissions?.onAdded?.addListener(checkAccess);
+  chrome.permissions?.onRemoved?.addListener(checkAccess);
+
   // Panels are rebuilt on every render; carry their scroll position over so clicking inside a
   // scrolled panel does not jump back to the top.
   let lastMonthKey = null;
@@ -469,7 +516,7 @@
     oldEl.replaceWith(newEl);
     if (keep && top) newEl.scrollTop = top;
   }
-  app.replaceChildren(toolbarEl, layoutEl);
+  app.replaceChildren(toolbarEl, accessEl, layoutEl);
 
   function render() {
     const { entries, holidays, updatedAt } = state.data;
@@ -699,6 +746,11 @@
     state.refresh = store.refresh ?? null;
     state.balance = store.balance ?? null;
     state.org = buildOrg(store.orgTree);
+    if (state.org) {
+      let changed = false;
+      for (const r of state.org.roots) if (state.depts.delete(r.name)) changed = true;
+      if (changed) saveDepts();
+    }
     state.data = normalize(store);
     state.diag = store.diag ?? null;
     render();
@@ -713,5 +765,6 @@
   // Power Apps에서 새 데이터가 들어오면 자동으로 다시 그립니다.
   chrome.storage.onChanged.addListener((_changes, area) => { if (area === "local") load(); });
 
+  checkAccess();
   load().then(maybeAutoRefresh);
 })();
