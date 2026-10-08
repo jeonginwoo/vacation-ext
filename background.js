@@ -3,6 +3,9 @@
 
 let queue = Promise.resolve();
 
+// no number badge on the toolbar icon (also clears one left over from older versions)
+chrome.action.setBadgeText({ text: "" });
+
 const POWERAPPS_URL =
   "https://apps.powerapps.com/play/e/default-fc6c5276-13d7-46c6-a396-d18ca58b5ad9/a/d46f58f0-e3d2-4138-b41d-bad3e0ba351b";
 const REFRESH_TIMEOUT_MIN = 2;
@@ -70,13 +73,7 @@ function merge(payload) {
       }
     }
 
-    return chrome.storage.local.set({ [bucketName]: bucket, updatedAt: Date.now() }).then(() => {
-      if (bucketName !== "vacations") return;
-      // badge = number of collected leave entries (shows that collection works)
-      const count = Object.values(bucket).filter((v) => v.UserName && v.UseDate).length;
-      chrome.action.setBadgeBackgroundColor({ color: "#2F64D6" });
-      chrome.action.setBadgeText({ text: count > 999 ? "999+" : String(count) });
-    });
+    return chrome.storage.local.set({ [bucketName]: bucket, updatedAt: Date.now() });
   });
 }
 
