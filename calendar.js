@@ -237,7 +237,6 @@
     const renderNode = (node) => {
       const kids = org.children.get(node.code) ?? [];
       const depth = depthOf(org, node);
-      const isRoot = depth === 0;
       const open = state.expanded.has(node.code) ? state.expanded.get(node.code) : depth < 2;
       const selected = state.depts.has(node.name);
       const implied = !selected && ancestorSelected(org, node);
@@ -250,24 +249,16 @@
                 onclick: () => { state.expanded.set(node.code, !open); render(); },
               }, open ? "▾" : "▸")
             : h("span", { class: "org-caret-space" }),
-          isRoot
-            // top of the tree (the company): no checkbox, since nothing checked already means "everyone"
-            ? h("button", {
-                type: "button", class: "org-name org-root",
-                onclick: () => { if (kids.length) { state.expanded.set(node.code, !open); render(); } },
-              },
-                h("span", { class: "org-label" }, node.name),
-                count ? h("span", { class: "org-count" }, count) : null)
-            : h("button", {
-                type: "button", class: "org-name",
-                "aria-pressed": String(selected || implied),
-                disabled: implied,
-                title: implied ? "상위 부서가 선택되어 함께 표시 중입니다" : null,
-                onclick: () => toggleDept(node.name),
-              },
-                h("span", { class: "org-check" }),
-                h("span", { class: "org-label" }, node.name),
-                count ? h("span", { class: "org-count" }, count) : null),
+          h("button", {
+            type: "button", class: "org-name",
+            "aria-pressed": String(selected || implied),
+            disabled: implied,
+            title: implied ? "상위 부서가 선택되어 함께 표시 중입니다" : null,
+            onclick: () => toggleDept(node.name),
+          },
+            h("span", { class: "org-check" }),
+            h("span", { class: "org-label" }, node.name),
+            count ? h("span", { class: "org-count" }, count) : null),
         ),
         kids.length && open ? h("ul", { role: "group" }, kids.map(renderNode)) : null,
       );
@@ -746,11 +737,6 @@
     state.refresh = store.refresh ?? null;
     state.balance = store.balance ?? null;
     state.org = buildOrg(store.orgTree);
-    if (state.org) {
-      let changed = false;
-      for (const r of state.org.roots) if (state.depts.delete(r.name)) changed = true;
-      if (changed) saveDepts();
-    }
     state.data = normalize(store);
     state.diag = store.diag ?? null;
     render();

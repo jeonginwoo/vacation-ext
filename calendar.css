@@ -138,9 +138,6 @@ button, input, select { font: inherit; color: inherit; }
   cursor: pointer;
 }
 
-/* org tree root (company): label only, no checkbox */
-.org-name.org-root { font-weight: 700; }
-
 /* own leave balance (top bar) */
 .balance { display: flex; align-items: center; gap: 6px; }
 .balance[hidden] { display: none; }
