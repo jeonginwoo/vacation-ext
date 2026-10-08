@@ -95,8 +95,10 @@ button, input, select { font: inherit; color: inherit; }
   font-size: 13px;
   cursor: pointer;
 }
-.nav-buttons button:first-child, .nav-buttons button:last-child { font-size: 20px; line-height: 1; }
 .nav-buttons button:nth-child(2) { font-weight: 600; color: var(--ink); }
+/* arrows are SVG icons, so they sit exactly in the middle (text glyphs ride low on the baseline) */
+.nav-buttons .nav-arrow { padding: 0; }
+.nav-buttons .nav-arrow svg { width: 18px; height: 18px; }
 .nav-buttons button:hover { color: var(--ink); background: color-mix(in srgb, var(--line) 60%, transparent); }
 
 .month-count { margin: 0; color: var(--ink-soft); font-size: 13px; font-variant-numeric: tabular-nums; }
@@ -172,27 +174,47 @@ button, input, select { font: inherit; color: inherit; }
 }
 .meta a { color: var(--accent); text-decoration: none; }
 .meta a:hover { text-decoration: underline; }
-.meta button {
+/* icon buttons (refresh / clear) with a quick tooltip */
+.icon-btn {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
   padding: 0;
   border: 0;
+  border-radius: var(--radius);
   background: none;
-  color: var(--ink-faint);
-  font-size: 12.5px;
+  color: var(--ink-soft);
   cursor: pointer;
 }
-.meta button:hover { color: var(--ink-soft); text-decoration: underline; }
+.icon-btn svg { width: 17px; height: 17px; }
+.icon-btn:hover:not(:disabled) { color: var(--accent); background: color-mix(in srgb, var(--line) 60%, transparent); }
+.icon-btn.danger:hover:not(:disabled) { color: var(--holiday); }
+.icon-btn:disabled { color: var(--ink-faint); cursor: default; }
+.icon-btn.spinning svg { animation: spin 1s linear infinite; animation-delay: var(--spin-delay, 0ms); }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .icon-btn.spinning svg { animation: none; } }
 
-.meta .refresh-btn {
-  height: 24px;
-  padding: 0 10px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--surface);
-  color: var(--accent);
+.icon-btn[data-tip]:hover::after,
+.icon-btn[data-tip]:focus-visible::after {
+  content: attr(data-tip);
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: var(--ink);
+  color: var(--surface);
   font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+  white-space: nowrap;
+  pointer-events: none;
 }
-.meta .refresh-btn:hover:not(:disabled) { border-color: var(--accent); text-decoration: none; }
-.meta .refresh-btn:disabled { color: var(--ink-faint); cursor: default; }
+
 .refresh-failed { color: var(--holiday); }
 .refresh-failed a { color: inherit; text-decoration: underline; }
 

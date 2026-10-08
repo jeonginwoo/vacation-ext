@@ -115,6 +115,23 @@
     return el;
   }
 
+  // inline icons for small buttons (constant markup)
+  const ICONS = {
+    refresh: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v5h-5"/></svg>',
+    prev: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>',
+    next: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>',
+    trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16"/><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>',
+  };
+  function iconButton(icon, tip, props = {}) {
+    const btn = h("button", { type: "button", class: `icon-btn ${props.class ?? ""}`.trim(), "aria-label": tip, "data-tip": tip,
+      disabled: props.disabled, onclick: props.onclick });
+    btn.innerHTML = ICONS[icon];
+    // The button is re-created on every render; start the spin at the phase the clock says it
+    // should be at, so the rotation continues smoothly instead of restarting from 0 each time.
+    if ((props.class ?? "").includes("spinning")) btn.style.setProperty("--spin-delay", `-${Date.now() % 1000}ms`);
+    return btn;
+  }
+
   /* ---------- 상태 ---------- */
 
   const now = new Date();
@@ -430,14 +447,14 @@
   const balanceEl = h("div", { class: "balance", "aria-live": "polite" });
   // month navigation, placed just above the calendar's top-right corner
   const navEl = h("div", { class: "nav-buttons" },
-    h("button", { type: "button", "aria-label": "이전 달", onclick: () => move(-1) }, "‹"),
+    iconButton("prev", "이전 달", { class: "nav-arrow", onclick: () => move(-1) }),
     h("button", {
       type: "button",
       onclick: () => {
         state.year = now.getFullYear(); state.month = now.getMonth(); state.selected = toWeekday(today); render();
       },
     }, "오늘"),
-    h("button", { type: "button", "aria-label": "다음 달", onclick: () => move(1) }, "›"),
+    iconButton("next", "다음 달", { class: "nav-arrow", onclick: () => move(1) }),
   );
   const legendSlot = h("span", { class: "legend-slot" });
   const toolbarEl = h("header", { class: "toolbar" },
@@ -550,10 +567,10 @@
             month: "long", day: "numeric", hour: "2-digit", minute: "2-digit",
           })}`)
         : null,
-      h("button", {
-        type: "button", class: "refresh-btn", disabled: running,
+      iconButton("refresh", running ? "갱신 중…" : "휴가 정보 갱신", {
+        class: running ? "spinning" : "", disabled: running,
         onclick: () => requestRefresh(),
-      }, running ? "갱신 중…" : "휴가 정보 갱신"),
+      }),
       rf?.status === "failed" && !running
         ? h("span", { class: "refresh-failed" },
             "자동으로 받지 못했어요. ",
@@ -561,17 +578,16 @@
             "에 로그인되어 있는지 확인하고 직접 열어주세요.")
         : null,
       updatedAt
-        ? h("button", {
-            type: "button",
+        ? iconButton("trash", "수집 데이터 지우기", {
+            class: "danger",
             onclick: async () => {
               if (!confirm("수집한 휴가 데이터를 모두 지울까요?")) return;
               // department selection belongs to the collected org chart, so reset it too
               state.depts.clear();
               saveDepts();
               await chrome.storage.local.clear();
-              chrome.action.setBadgeText({ text: "" });
             },
-          }, "수집 데이터 지우기")
+          })
         : null,
     ].filter(Boolean));
 
