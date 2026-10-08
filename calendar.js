@@ -473,9 +473,6 @@
     iconButton("next", "다음 달", { class: "nav-arrow", onclick: () => move(1) }),
   );
   const legendSlot = h("span", { class: "legend-slot" });
-  const toolbarEl = h("header", { class: "toolbar" },
-    h("div", { class: "filters" }, balanceEl),
-  );
   // Row above the three panels:
   //   above the org chart  -> search
   //   above the calendar   -> month title + collection status (left), month navigation (right)
@@ -485,7 +482,8 @@
     h("div", { class: "calendar-head-left" }, titleEl, metaEl),
     navEl,
   );
-  const legendWrap = h("div", { class: "legend-wrap" }, legendSlot);
+  // leave-type checkboxes, with the user's own remaining leave shown small on the right
+  const legendWrap = h("div", { class: "legend-wrap" }, legendSlot, balanceEl);
   // The layout and the head row stay mounted; only the sidebar / calendar / detail panels are swapped
   // on each render, so the search input is never detached while typing.
   let sideEl = h("aside", { class: "org" });
@@ -540,7 +538,7 @@
     oldEl.replaceWith(newEl);
     if (keep && top) newEl.scrollTop = top;
   }
-  app.replaceChildren(toolbarEl, accessEl, layoutEl);
+  app.replaceChildren(accessEl, layoutEl);
 
   function render() {
     const { entries, holidays, updatedAt } = state.data;
@@ -717,9 +715,9 @@
       h("span", { class: "balance-label" }, label),
       h("strong", {}, fmtDays(v.remain)),
       h("span", { class: "balance-total" }, `/ ${fmtDays(v.total)}일`));
-    if (b.annual) parts.push(item("내 잔여 연차", b.annual, "annual"));
+    if (b.annual) parts.push(item("잔여 연차", b.annual, "annual"));
     // long-service leave only when the user actually has some
-    if (b.longService && (b.longService.total ?? 0) > 0) parts.push(item("근속연차", b.longService, "long"));
+    if (b.longService && (b.longService.total ?? 0) > 0) parts.push(item("근속", b.longService, "long"));
     balanceEl.replaceChildren(...parts);
     balanceEl.hidden = parts.length === 0;
   }
