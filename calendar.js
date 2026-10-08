@@ -459,6 +459,16 @@
   let calEl = h("section", { class: "calendar" });
   let detailEl = h("aside", { class: "detail" });
   const layoutEl = h("div", { class: "layout" }, searchWrap, headEl, legendWrap, sideEl, calEl, detailEl);
+
+  // Panels are rebuilt on every render; carry their scroll position over so clicking inside a
+  // scrolled panel does not jump back to the top.
+  let lastMonthKey = null;
+  let lastSelected = null;
+  function swapKeepingScroll(oldEl, newEl, keep) {
+    const top = oldEl.scrollTop;
+    oldEl.replaceWith(newEl);
+    if (keep && top) newEl.scrollTop = top;
+  }
   app.replaceChildren(toolbarEl, layoutEl);
 
   function render() {
@@ -626,9 +636,14 @@
     }
 
     legendSlot.replaceChildren(...(legend ? [legend] : []));
-    sideEl.replaceWith(sidebar); sideEl = sidebar;
-    calEl.replaceWith(calendar); calEl = calendar;
-    detailEl.replaceWith(detail); detailEl = detail;
+    // keep scroll positions; the calendar starts at the top only when the month changes,
+    // the day detail only when another day is selected
+    const monthKey = `${state.year}-${state.month}`;
+    swapKeepingScroll(sideEl, sidebar, true); sideEl = sidebar;
+    swapKeepingScroll(calEl, calendar, monthKey === lastMonthKey); calEl = calendar;
+    swapKeepingScroll(detailEl, detail, state.selected === lastSelected); detailEl = detail;
+    lastMonthKey = monthKey;
+    lastSelected = state.selected;
   }
 
   /* ---------- 시작 ---------- */
