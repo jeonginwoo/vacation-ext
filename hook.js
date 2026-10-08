@@ -8,25 +8,27 @@
 
   const ITEMS_RE = /\/apis\/sharepointonline\/.*?\/tables\/([0-9a-f-]{36})\/items/i;
   const CONNECTOR_RE = /environment\.api\.powerplatform\.com|\/apis\/sharepointonline\//i;
-  const VACATION_FIELDS = ["ID", "UserName", "UserDeptName", "TypeName", "HalfName",
+  const VACATION_FIELDS = ["ID", "UserName", "UserEmail", "UserDeptName", "TypeName", "HalfName",
     "UseDate", "Period", "UseYear", "CancelYN"];
   const HOLIDAY_FIELDS = ["ID", "Title", "HolidayDate", "HolidayType"];
 
-  // Leave balance lists (one row per employee). Only the signed-in user's own row is ever kept;
-  // other employees' rows are read in memory to find that row and then discarded.
+  // Leave balance lists (one row per employee): name, email, granted / used / remaining days.
   const BALANCE_LISTS = {
     "01674c22-0fb3-4c8a-9b92-a60a6e54ca1a": "annual",      // annual leave (one row per user per Year)
-    "bbaac026-ede5-4d45-8268-45dd3ec13015": "longService", // long-service leave
+    "bbaac026-ede5-4d45-8268-45dd3ec13015": "longService", // long-service leave (no Year column)
   };
-  const BALANCE_SELECT = "ID,RemainAnnualCount,TotalAnnualCount,UseAnnualCount,UserEmail,Year";
+  const BALANCE_SELECT = {
+    annual: "ID,UserName,UserEmail,Year,TotalAnnualCount,UseAnnualCount,RemainAnnualCount",
+    longService: "ID,UserName,UserEmail,TotalAnnualCount,UseAnnualCount,RemainAnnualCount",
+  };
   let ownEmail = null; // learned from the app's own "UserEmail eq '...'" filters
 
   // Auto refresh: the same list queries the app sends when the leave screen is opened.
   // They are sent from this page with the app's own request headers (kept in memory only).
   const REFRESH_QUERIES = [
-    ["7a9a67ad-a6e6-4242-9e82-9b84c9cd74dc", "HalfName,ID,Period,Title,TypeName,UseDate,UserDeptName,UserName,UseYear"],
+    ["7a9a67ad-a6e6-4242-9e82-9b84c9cd74dc", "HalfName,ID,Period,Title,TypeName,UseDate,UserDeptName,UserEmail,UserName,UseYear"],
     ["7a9a67ad-a6e6-4242-9e82-9b84c9cd74dc", "CancelYN,ID,UseYear"],
-    ["ce4b7dda-cece-42d2-a009-d257973fef03", "HalfName,ID,Period,Title,TypeName,UseDate,UserDeptName,UserName,UseYear"],
+    ["ce4b7dda-cece-42d2-a009-d257973fef03", "HalfName,ID,Period,Title,TypeName,UseDate,UserDeptName,UserEmail,UserName,UseYear"],
     ["ce4b7dda-cece-42d2-a009-d257973fef03", "CancelYN,ID,UseYear"],
     ["ed13b1cc-b5ff-4f5b-a210-bd286adc5f57", "HolidayDate,HolidayType,ID,Title"],
   ];
@@ -123,9 +125,22 @@
 
   function num(v) { const n = Number(v); return Number.isFinite(n) ? n : null; }
 
-  // keep only the signed-in user's own balance row
+  // balance rows: everyone's (for the leave status popup) + the signed-in user's own
   function handleBalance(listId, rows, via) {
     const kind = BALANCE_LISTS[listId] ?? (("Year" in rows[0]) ? "annual" : "longService");
+    if ("UserName" in rows[0]) {
+      post({
+        kind: "balances", balanceKind: kind,
+        rows: rows.map((r) => ({
+          name: String(r.UserName ?? "").trim(),
+          email: String(r.UserEmail ?? "").toLowerCase(),
+          year: r.Year != null ? String(r.Year) : null,
+          total: num(r.TotalAnnualCount),
+          used: num(r.UseAnnualCount),
+          remain: num(r.RemainAnnualCount),
+        })),
+      });
+    }
     if (!ownEmail) { diag("balance", { via, kind, skipped: "email unknown" }); return; }
     const mine = rows.filter((r) => String(r.UserEmail ?? "").toLowerCase() === ownEmail);
     if (!mine.length) return;
@@ -187,12 +202,9 @@
     replayed = true;
     const base = templateUrl.slice(0, templateUrl.indexOf("/tables/") + "/tables/".length);
     const queries = REFRESH_QUERIES.map(([listId, select]) => `${base}${listId}/items?%24select=${encodeURIComponent(select)}&%24top=500`);
-    if (ownEmail) {
-      // own balance only: filtered by the user's email, so other employees' rows are not even requested
-      const filter = encodeURIComponent(`UserEmail eq '${ownEmail.replace(/'/g, "''")}'`);
-      for (const listId of Object.keys(BALANCE_LISTS)) {
-        queries.push(`${base}${listId}/items?%24select=${encodeURIComponent(BALANCE_SELECT)}&%24filter=${filter}&%24top=50`);
-      }
+    // leave balances of everyone (same lists the app loads on its leave screen)
+    for (const [listId, kind] of Object.entries(BALANCE_LISTS)) {
+      queries.push(`${base}${listId}/items?%24select=${encodeURIComponent(BALANCE_SELECT[kind])}&%24top=500`);
     }
     let pending = queries.length;
     let ok = 0;

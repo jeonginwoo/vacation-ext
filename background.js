@@ -112,6 +112,14 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
       balance[p.balanceKind] = { year: p.year, total: p.total, used: p.used, remain: p.remain, at: Date.now() };
       await chrome.storage.local.set({ balance });
     }).catch((err) => console.error(err));
+  } else if (msg.type === "balances") {
+    // everyone's leave balance (annual / longService), replaced as a snapshot per list
+    const p = msg.payload;
+    queue = queue.then(async () => {
+      const { balances = {} } = await chrome.storage.local.get("balances");
+      balances[p.balanceKind] = { rows: p.rows, at: Date.now() };
+      await chrome.storage.local.set({ balances });
+    }).catch((err) => console.error(err));
   } else if (msg.type === "orgtree") {
     // org chart: keep department structure only (replace with latest)
     queue = queue.then(() => chrome.storage.local.set({

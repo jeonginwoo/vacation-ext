@@ -38,6 +38,7 @@
         id: key,
         name,
         dept: val(r.UserDeptName),
+        email: val(r.UserEmail).toLowerCase(),
         type: val(r.TypeName) || "기타",
         half: val(r.HalfName) || null,
         date,
@@ -117,6 +118,7 @@
 
   // inline icons for small buttons (constant markup)
   const ICONS = {
+    close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>',
     refresh: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v5h-5"/></svg>',
     prev: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>',
     next: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>',
@@ -214,31 +216,35 @@
     return out;
   }
 
-  function ancestorSelected(org, node) {
+  function ancestorSelected(org, node, sel = state.depts) {
     let cur = node;
     while (cur.parent && org.byCode.has(cur.parent)) {
       cur = org.byCode.get(cur.parent);
-      if (state.depts.has(cur.name)) return true;
+      if (sel.has(cur.name)) return true;
     }
     return false;
   }
 
-  function toggleDept(name) {
-    if (state.depts.has(name)) state.depts.delete(name);
-    else {
-      state.depts.add(name);
-      // selecting a parent unit drops sub-departments that were picked individually
-      const org = state.org;
-      if (org) for (const n of org.byName.get(name) ?? []) {
-        for (const sub of subtreeNames(org, n)) if (sub !== name) state.depts.delete(sub);
-      }
+  // toggle a department in a selection set; selecting a parent unit drops sub-departments
+  // that were picked individually
+  function toggleIn(sel, name) {
+    if (sel.has(name)) { sel.delete(name); return; }
+    sel.add(name);
+    const org = state.org;
+    if (org) for (const n of org.byName.get(name) ?? []) {
+      for (const sub of subtreeNames(org, n)) if (sub !== name) sel.delete(sub);
     }
+  }
+
+  function toggleDept(name) {
+    toggleIn(state.depts, name);
     saveDepts();
     render();
   }
 
   // department tree with this month's number of people on leave per node (subtree, unique names)
-  function renderOrgTree(org, peopleByDept) {
+  // sel / onToggle / rerender let the leave status popup reuse the same tree with its own selection
+  function renderOrgTree(org, peopleByDept, { sel = state.depts, onToggle = toggleDept, rerender = render } = {}) {
     const countCache = new Map();
     const countFor = (node) => {
       if (countCache.has(node.code)) return countCache.get(node.code);
@@ -252,15 +258,15 @@
       const kids = org.children.get(node.code) ?? [];
       const depth = depthOf(org, node);
       const open = state.expanded.has(node.code) ? state.expanded.get(node.code) : depth < 2;
-      const selected = state.depts.has(node.name);
-      const implied = !selected && ancestorSelected(org, node);
+      const selected = sel.has(node.name);
+      const implied = !selected && ancestorSelected(org, node, sel);
       const count = countFor(node);
       return h("li", { class: "org-node", role: "treeitem", "aria-expanded": kids.length ? String(open) : null },
         h("div", { class: ["org-row", selected && "selected", implied && "implied"].filter(Boolean).join(" ") },
           kids.length
             ? h("button", {
                 type: "button", class: "org-caret", "aria-label": open ? "접기" : "펼치기",
-                onclick: () => { state.expanded.set(node.code, !open); render(); },
+                onclick: () => { state.expanded.set(node.code, !open); rerender(); },
               }, open ? "▾" : "▸")
             : h("span", { class: "org-caret-space" }),
           h("button", {
@@ -268,7 +274,7 @@
             "aria-pressed": String(selected || implied),
             disabled: implied,
             title: implied ? "상위 부서가 선택되어 함께 표시 중입니다" : null,
-            onclick: () => toggleDept(node.name),
+            onclick: () => onToggle(node.name),
           },
             h("span", { class: "org-check" }),
             h("span", { class: "org-label" }, node.name),
@@ -461,6 +467,9 @@
   });
   metaEl.append(collectedEl, refreshBtn, failedEl, clearDataBtn);
   const balanceEl = h("div", { class: "balance", "aria-live": "polite" });
+  // own remaining leave; clicking opens everyone's leave status (built once, updated in renderBalance)
+  const balanceBtn = h("button", { type: "button", class: "balance-btn", onclick: () => openPopup() });
+  balanceEl.append(balanceBtn);
   // month navigation, placed just above the calendar's top-right corner
   const navEl = h("div", { class: "nav-buttons" },
     iconButton("prev", "이전 달", { class: "nav-arrow", onclick: () => move(-1) }),
@@ -705,21 +714,170 @@
   // 0.5 -> "0.5", 6 -> "6"
   const fmtDays = (n) => (n == null ? "-" : String(Math.round(n * 100) / 100));
 
+  // own remaining leave as a small button; it opens the leave status popup (everyone's balance)
   function renderBalance() {
     const b = state.balance ?? {};
     const parts = [];
-    const item = (label, v, cls) => h("span", {
-      class: `balance-item ${cls}`,
-      title: `${v.year ? v.year + "년 · " : ""}부여 ${fmtDays(v.total)}일 · 사용 ${fmtDays(v.used)}일 · 잔여 ${fmtDays(v.remain)}일`,
-    },
-      h("span", { class: "balance-label" }, label),
+    const item = (v, cls, prefix) => h("span", { class: `balance-item ${cls}` },
+      prefix ? h("span", { class: "balance-label" }, prefix) : null,
       h("strong", {}, fmtDays(v.remain)),
       h("span", { class: "balance-total" }, `/ ${fmtDays(v.total)}일`));
-    if (b.annual) parts.push(item("잔여 연차", b.annual, "annual"));
+    if (b.annual) parts.push(item(b.annual, "annual"));
     // long-service leave only when the user actually has some
-    if (b.longService && (b.longService.total ?? 0) > 0) parts.push(item("근속", b.longService, "long"));
-    balanceEl.replaceChildren(...parts);
+    if (b.longService && (b.longService.total ?? 0) > 0) parts.push(item(b.longService, "long", "근속"));
+    const hasEveryone = (state.balances?.annual?.rows?.length ?? 0) > 0;
+    if (!parts.length && hasEveryone) parts.push(h("span", { class: "balance-item" }, "연차 현황"));
+    balanceBtn.replaceChildren(...parts);
+    balanceBtn.disabled = !hasEveryone;
+    balanceBtn.dataset.tip = hasEveryone ? "전체 연차 현황 보기" : "내 잔여 연차";
     balanceEl.hidden = parts.length === 0;
+  }
+
+  /* ---------- leave status popup (everyone's remaining leave) ---------- */
+
+  const popup = { open: false, depts: new Set(), query: "", sort: { key: "dept", dir: 1 } };
+  const NO_DEPT = "부서 정보 없음";
+
+  const popupSearch = h("input", {
+    type: "search", class: "popup-search", placeholder: "이름 검색",
+    oninput: (ev) => { popup.query = ev.target.value; renderPopup(); },
+  });
+  const popupSub = h("span", { class: "popup-sub" });
+  let popupSide = h("div", { class: "popup-side" });
+  let popupBody = h("div", { class: "popup-body" });
+  const popupBox = h("div", { class: "popup", role: "dialog", "aria-modal": "true", "aria-label": "연차 현황" },
+    h("div", { class: "popup-head" },
+      h("div", { class: "popup-title" }, h("h2", {}, "연차 현황"), popupSub),
+      popupSearch,
+      iconButton("close", "닫기", { class: "popup-close", onclick: () => closePopup() })),
+    popupSide,
+    popupBody);
+  const popupEl = h("div", { class: "popup-backdrop", onclick: (ev) => { if (ev.target === popupEl) closePopup(); } }, popupBox);
+  popupEl.hidden = true;
+  document.body.append(popupEl);
+
+  function openPopup() {
+    popup.open = true;
+    popup.depts = new Set(state.depts); // start from the calendar's department selection
+    renderPopup();
+    popupEl.hidden = false;
+    popupSearch.focus();
+  }
+  function closePopup() {
+    popup.open = false;
+    popupEl.hidden = true;
+    balanceBtn.focus();
+  }
+
+  // one row per person: current year's annual balance + long-service balance, department via email
+  function buildPeople() {
+    const year = String(new Date(Date.now() + 9 * 3600e3).getUTCFullYear());
+    const deptByEmail = new Map();
+    const deptByName = new Map();
+    for (const e of state.data.entries) { // entries are sorted by date: later ones win
+      if (e.email && e.dept) deptByEmail.set(e.email, e.dept);
+      if (e.dept) deptByName.set(e.name, e.dept);
+    }
+    const byEmail = new Map();
+    for (const r of state.balances?.annual?.rows ?? []) {
+      const key = r.email || r.name;
+      const prev = byEmail.get(key);
+      // prefer this year's row, otherwise the latest year
+      if (!prev || r.year === year || (prev.year !== year && String(r.year ?? "") > String(prev.year ?? ""))) byEmail.set(key, r);
+    }
+    const longByEmail = new Map((state.balances?.longService?.rows ?? []).map((r) => [r.email || r.name, r]));
+    return [...byEmail.entries()].map(([key, r]) => ({
+      name: r.name || key,
+      email: r.email,
+      dept: deptByEmail.get(r.email) || deptByName.get(r.name) || NO_DEPT,
+      year: r.year,
+      total: r.total, used: r.used ?? (r.total != null && r.remain != null ? r.total - r.remain : null), remain: r.remain,
+      long: longByEmail.get(key) ?? null,
+    }));
+  }
+
+  function renderPopup() {
+    if (!popup.open) return;
+    const people = buildPeople();
+    const me = state.me?.email ?? null;
+    const year = people.find((p) => p.year)?.year;
+    popupSub.textContent = `${year ? year + "년 · " : ""}${people.length}명`;
+
+    // sidebar: same department tree / list as the calendar, counting people per department
+    const peopleByDept = new Map();
+    for (const p of people) {
+      const set = peopleByDept.get(p.dept) ?? new Set();
+      set.add(p.email || p.name);
+      peopleByDept.set(p.dept, set);
+    }
+    const onToggle = (name) => { toggleIn(popup.depts, name); renderPopup(); };
+    const flatRow = (d) => h("li", { class: "org-node" },
+      h("div", { class: ["org-row", popup.depts.has(d) && "selected"].filter(Boolean).join(" ") },
+        h("span", { class: "org-caret-space" }),
+        h("button", { type: "button", class: "org-name", "aria-pressed": String(popup.depts.has(d)), onclick: () => onToggle(d) },
+          h("span", { class: "org-check" }),
+          h("span", { class: "org-label" }, d),
+          peopleByDept.get(d)?.size ? h("span", { class: "org-count" }, peopleByDept.get(d).size) : null)));
+    const known = new Set(state.org ? state.org.nodes.map((n) => n.name) : []);
+    const others = [...peopleByDept.keys()].filter((d) => !known.has(d)).sort((a, b) =>
+      (a === NO_DEPT) - (b === NO_DEPT) || a.localeCompare(b, "ko"));
+    const side = h("div", { class: "popup-side" },
+      h("div", { class: "org-head" },
+        h("h3", {}, state.org?.company || "부서"),
+        popup.depts.size ? h("button", { type: "button", class: "tag-clear", onclick: () => { popup.depts.clear(); renderPopup(); } }, "선택 해제") : null),
+      state.org ? renderOrgTree(state.org, peopleByDept, { sel: popup.depts, onToggle, rerender: renderPopup }) : null,
+      others.length
+        ? h("div", { class: state.org ? "org-others" : "" },
+            state.org ? h("p", { class: "org-others-title" }, "조직도에 없는 부서") : null,
+            h("ul", { class: "org-tree" }, others.map(flatRow)))
+        : null);
+
+    // table
+    const deptSet = effectiveDepts(state.org, popup.depts);
+    const q = popup.query.trim();
+    const rows = people.filter((p) =>
+      (popup.depts.size === 0 || deptSet.has(p.dept)) &&
+      (!q || p.name.includes(q) || p.dept.includes(q)));
+    const { key, dir } = popup.sort;
+    // departments follow the org chart order; "no department" always last
+    const deptOrder = new Map((state.org?.nodes ?? []).map((n, i) => [n.name, i]));
+    const deptCmp = (a, b) => (a === NO_DEPT) - (b === NO_DEPT)
+      || (deptOrder.get(a) ?? 1e9) - (deptOrder.get(b) ?? 1e9)
+      || a.localeCompare(b, "ko");
+    const value = (p) => (key === "long" ? p.long?.remain ?? null : p[key]);
+    rows.sort((a, b) => {
+      let c;
+      if (key === "dept") c = deptCmp(a.dept, b.dept);
+      else {
+        const va = value(a), vb = value(b);
+        c = typeof va === "number" || typeof vb === "number"
+          ? (va ?? -Infinity) - (vb ?? -Infinity)
+          : String(va ?? "").localeCompare(String(vb ?? ""), "ko");
+      }
+      return c * dir || deptCmp(a.dept, b.dept) || a.name.localeCompare(b.name, "ko");
+    });
+    const showLong = people.some((p) => (p.long?.total ?? 0) > 0);
+    const cols = [["name", "이름"], ["dept", "부서"], ["total", "부여"], ["used", "사용"], ["remain", "잔여"]];
+    if (showLong) cols.push(["long", "근속 잔여"]);
+    const head = h("tr", {}, cols.map(([k, label]) => h("th", { class: ["total", "used", "remain", "long"].includes(k) ? "num" : "" },
+      h("button", {
+        type: "button", class: "sort-btn", "aria-sort": key === k ? (dir > 0 ? "ascending" : "descending") : "none",
+        onclick: () => { popup.sort = { key: k, dir: key === k ? -dir : 1 }; renderPopup(); },
+      }, label, key === k ? h("span", { class: "sort-mark" }, dir > 0 ? "▲" : "▼") : null))));
+    const body = rows.map((p) => h("tr", { class: p.email && p.email === me ? "me" : "" },
+      h("td", {}, p.name, p.email && p.email === me ? h("span", { class: "me-tag" }, "나") : null),
+      h("td", { class: p.dept === NO_DEPT ? "muted" : "" }, p.dept),
+      h("td", { class: "num" }, fmtDays(p.total)),
+      h("td", { class: "num" }, fmtDays(p.used)),
+      h("td", { class: "num remain" }, fmtDays(p.remain)),
+      showLong ? h("td", { class: "num" }, p.long && (p.long.total ?? 0) > 0 ? `${fmtDays(p.long.remain)} / ${fmtDays(p.long.total)}` : "-") : null));
+    const table = h("div", { class: "popup-body" },
+      rows.length
+        ? h("table", { class: "balance-table" }, h("thead", {}, head), h("tbody", {}, body))
+        : h("p", { class: "empty" }, people.length ? "조건에 맞는 사람이 없습니다." : "아직 수집된 연차 정보가 없습니다. 휴가 정보를 갱신해 주세요."));
+
+    swapKeepingScroll(popupSide, side, true); popupSide = side;
+    swapKeepingScroll(popupBody, table, true); popupBody = table;
   }
 
   /* ---------- auto refresh ---------- */
@@ -747,16 +905,20 @@
   }
 
   async function load() {
-    const store = await chrome.storage.local.get(["vacations", "holidays", "updatedAt", "diag", "orgTree", "refresh", "balance"]);
+    const store = await chrome.storage.local.get(["vacations", "holidays", "updatedAt", "diag", "orgTree", "refresh", "balance", "balances", "me"]);
     state.refresh = store.refresh ?? null;
     state.balance = store.balance ?? null;
+    state.balances = store.balances ?? null;
+    state.me = store.me ?? null;
     state.org = buildOrg(store.orgTree);
     state.data = normalize(store);
     state.diag = store.diag ?? null;
     render();
+    renderPopup();
   }
 
   window.addEventListener("keydown", (e) => {
+    if (popup.open) { if (e.key === "Escape") closePopup(); return; }
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
     if (e.key === "ArrowLeft") move(-1);
     if (e.key === "ArrowRight") move(1);

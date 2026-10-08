@@ -4,7 +4,7 @@ window.addEventListener("message", (event) => {
   const data = event.data;
   if (!data || data.__vacationBoard !== true) return;
   try {
-    const type = ["diag", "refresh-done", "me", "balance"].includes(data.kind) ? data.kind : "capture";
+    const type = ["diag", "refresh-done", "me", "balance", "balances"].includes(data.kind) ? data.kind : "capture";
     chrome.runtime.sendMessage({ type, payload: data });
   } catch {
     // 확장이 새로고침된 직후 등에는 무시
