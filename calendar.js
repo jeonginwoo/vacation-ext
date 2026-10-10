@@ -717,6 +717,8 @@
   // own remaining leave as a small button; it opens the leave status popup (everyone's balance)
   function renderBalance() {
     const b = state.balance ?? {};
+    // show nothing at all (no button, no popup) until the user's own balance has been loaded
+    if (!b.annual) { balanceBtn.replaceChildren(); balanceEl.hidden = true; return; }
     const parts = [];
     const item = (v, cls, prefix) => h("span", { class: `balance-item ${cls}` },
       prefix ? h("span", { class: "balance-label" }, prefix) : null,
@@ -726,11 +728,10 @@
     // long-service leave only when the user actually has some
     if (b.longService && (b.longService.total ?? 0) > 0) parts.push(item(b.longService, "long", "근속"));
     const hasEveryone = (state.balances?.annual?.rows?.length ?? 0) > 0;
-    if (!parts.length && hasEveryone) parts.push(h("span", { class: "balance-item" }, "연차 현황"));
     balanceBtn.replaceChildren(...parts);
     balanceBtn.disabled = !hasEveryone;
     balanceBtn.dataset.tip = hasEveryone ? "전체 연차 현황 보기" : "내 잔여 연차";
-    balanceEl.hidden = parts.length === 0;
+    balanceEl.hidden = false;
   }
 
   /* ---------- leave status popup (everyone's remaining leave) ---------- */
