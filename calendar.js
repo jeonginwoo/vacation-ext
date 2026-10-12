@@ -846,8 +846,12 @@
       || (deptOrder.get(a) ?? 1e9) - (deptOrder.get(b) ?? 1e9)
       || a.localeCompare(b, "ko");
     const value = (p) => (key === "long" ? p.long?.remain ?? null : p[key]);
+    // long-service column: people who never had any go last in both directions, so someone who
+    // used it all up (0 left) still ranks above someone who never had it
+    const hasLong = (p) => (p.long?.total ?? 0) > 0;
     rows.sort((a, b) => {
       let c;
+      if (key === "long" && hasLong(a) !== hasLong(b)) return hasLong(a) ? -1 : 1;
       if (key === "dept") c = deptCmp(a.dept, b.dept);
       else {
         const va = value(a), vb = value(b);
