@@ -196,9 +196,10 @@
     return origSetHeader.apply(this, arguments);
   };
 
-  let replayed = false;
-  function replay(templateUrl, headers) {
-    if (replayed) return;
+  let replayed = false;      // automatic replay runs once per page load
+  let lastTemplate = null;   // most recent successful list request (freshest token) for on-demand refreshes
+  function replay(templateUrl, headers, force = false) {
+    if (replayed && !force) return;
     replayed = true;
     const base = templateUrl.slice(0, templateUrl.indexOf("/tables/") + "/tables/".length);
     const queries = REFRESH_QUERIES.map(([listId, select]) => `${base}${listId}/items?%24select=${encodeURIComponent(select)}&%24top=500`);
@@ -251,9 +252,12 @@
           diag("request", { via: "xhr", items: ITEMS_RE.test(url), status: this.status });
           if (!ITEMS_RE.test(url) || this.status < 200 || this.status >= 300) return;
           // first successful list request from the app: use it as the template for the refresh
-          if (!replayed && /\/apis\/sharepointonline\//i.test(url) && this.__vbHeaders) {
-            const headers = this.__vbHeaders;
-            setTimeout(() => replay(url, headers), 0);
+          if (/\/apis\/sharepointonline\//i.test(url) && this.__vbHeaders) {
+            lastTemplate = { url, headers: this.__vbHeaders };
+            if (!replayed) {
+              const headers = this.__vbHeaders;
+              setTimeout(() => replay(url, headers), 0);
+            }
           }
           readXhrBody(this)
             .then(({ body, meta }) => handleResponse(url, body, "xhr", meta))
@@ -334,6 +338,12 @@
     // own email saved by the extension (sent by relay.js on page load)
     if (ev.source === window && ev.data && ev.data.__vacationBoardCfg) {
       if (!ownEmail && typeof ev.data.email === "string") ownEmail = ev.data.email.toLowerCase();
+      return;
+    }
+    // refresh requested by the extension for this already-open tab (sent by relay.js)
+    if (ev.source === window && ev.data && ev.data.__vacationBoardCmd === "replay") {
+      if (lastTemplate) replay(lastTemplate.url, lastTemplate.headers, true);
+      else post({ kind: "refresh-done", ok: 0, total: 0, reason: "no-template" });
       return;
     }
     if (ev.data && ev.data.__vacationBoard) return;

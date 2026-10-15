@@ -11,6 +11,13 @@ window.addEventListener("message", (event) => {
   }
 });
 
+// refresh request from the extension for this already-open Power Apps tab -> ask the page to replay
+// (the extension finds open Power Apps tabs by pinging them: only tabs running this script answer)
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (msg?.type === "vb-ping") { sendResponse({ powerapps: window.top === window }); return; }
+  if (msg?.type === "vb-replay") window.postMessage({ __vacationBoardCmd: "replay" }, "*");
+});
+
 // pass the saved own email to the page so the auto refresh can ask for the user's own balance only
 chrome.storage.local.get("me").then(({ me }) => {
   if (me?.email) window.postMessage({ __vacationBoardCfg: true, email: me.email }, "*");

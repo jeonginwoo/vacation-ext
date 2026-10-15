@@ -10,39 +10,74 @@ const POWERAPPS_URL =
   "https://apps.powerapps.com/play/e/default-fc6c5276-13d7-46c6-a396-d18ca58b5ad9/a/d46f58f0-e3d2-4138-b41d-bad3e0ba351b";
 const REFRESH_TIMEOUT_MIN = 2;
 
-/* ---------- auto refresh: open Power Apps in a minimized window, then close it ---------- */
+/* ---------- auto refresh ----------
+   1) If a Power Apps tab is already open, ask that tab to re-run the leave queries (nothing opens).
+   2) Otherwise (or if that fails) open Power Apps in an inactive background tab of the current
+      window and close it when done. */
+
+const REUSE_TIMEOUT_MIN = 0.5; // 30 s for an already-open tab
 
 async function setRefresh(status, extra = {}) {
   await chrome.storage.local.set({ refresh: { status, at: Date.now(), ...extra } });
 }
 
 async function startRefresh() {
-  const { refreshWin } = await chrome.storage.session.get("refreshWin");
-  if (refreshWin) {
-    // still running unless the window is gone
-    try { await chrome.windows.get(refreshWin.id); return; } catch {}
+  const { refreshRun } = await chrome.storage.session.get("refreshRun");
+  if (refreshRun && Date.now() - refreshRun.started < (REFRESH_TIMEOUT_MIN + 1) * 60_000) {
+    try { await chrome.tabs.get(refreshRun.tabId); return; } catch { /* tab gone: start over */ }
   }
-  const win = await chrome.windows.create({ url: POWERAPPS_URL, state: "minimized", focused: false });
-  await chrome.storage.session.set({ refreshWin: { id: win.id, started: Date.now() } });
-  await setRefresh("running");
+  // 1) reuse an open Power Apps tab. Tab URLs are not visible without the "tabs" permission, so ask
+  //    every tab: only Power Apps tabs run relay.js and answer the ping.
+  let open = [];
+  try {
+    const tabs = await chrome.tabs.query({});
+    const answers = await Promise.all(tabs.map((t) =>
+      chrome.tabs.sendMessage(t.id, { type: "vb-ping" }, { frameId: 0 }).then((r) => (r?.powerapps ? t : null), () => null)));
+    open = answers.filter(Boolean);
+  } catch {}
+  for (const tab of open) {
+    try {
+      await chrome.tabs.sendMessage(tab.id, { type: "vb-replay" }, { frameId: 0 });
+      await chrome.storage.session.set({ refreshRun: { mode: "reuse", tabId: tab.id, started: Date.now() } });
+      await setRefresh("running", { method: "reuse" });
+      chrome.alarms.create("refresh-timeout", { delayInMinutes: REUSE_TIMEOUT_MIN });
+      return;
+    } catch { /* no collector in that tab (e.g. opened before the extension loaded): try the next */ }
+  }
+  // 2) background tab
+  await startTabRefresh();
+}
+
+async function startTabRefresh() {
+  let windowId;
+  try { windowId = (await chrome.windows.getLastFocused({ windowTypes: ["normal"] })).id; } catch {}
+  const tab = await chrome.tabs.create({ url: POWERAPPS_URL, active: false, ...(windowId != null ? { windowId } : {}) });
+  await chrome.storage.session.set({ refreshRun: { mode: "tab", tabId: tab.id, started: Date.now() } });
+  await setRefresh("running", { method: "tab" });
   chrome.alarms.create("refresh-timeout", { delayInMinutes: REFRESH_TIMEOUT_MIN });
 }
 
 async function finishRefresh(ok, reason) {
-  const { refreshWin } = await chrome.storage.session.get("refreshWin");
-  await chrome.storage.session.remove("refreshWin");
+  const { refreshRun } = await chrome.storage.session.get("refreshRun");
+  await chrome.storage.session.remove("refreshRun");
   chrome.alarms.clear("refresh-timeout");
-  if (refreshWin) { try { await chrome.windows.remove(refreshWin.id); } catch {} }
-  await setRefresh(ok ? "done" : "failed", { reason });
+  // close only the tab we opened ourselves, never the user's own Power Apps tab
+  if (refreshRun?.mode === "tab") { try { await chrome.tabs.remove(refreshRun.tabId); } catch {} }
+  await setRefresh(ok ? "done" : "failed", { reason, method: refreshRun?.mode });
 }
 
-chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === "refresh-timeout") finishRefresh(false, "timeout");
+chrome.alarms.onAlarm.addListener(async (alarm) => {
+  if (alarm.name !== "refresh-timeout") return;
+  const { refreshRun } = await chrome.storage.session.get("refreshRun");
+  if (refreshRun?.mode === "reuse") await startTabRefresh(); // open tab did not answer in time
+  else finishRefresh(false, "timeout");
 });
 
-chrome.windows.onRemoved.addListener(async (id) => {
-  const { refreshWin } = await chrome.storage.session.get("refreshWin");
-  if (refreshWin?.id === id) finishRefresh(false, "closed");
+chrome.tabs.onRemoved.addListener(async (tabId) => {
+  const { refreshRun } = await chrome.storage.session.get("refreshRun");
+  if (refreshRun?.tabId !== tabId) return;
+  if (refreshRun.mode === "reuse") await startTabRefresh(); // user closed it meanwhile
+  else finishRefresh(false, "closed");
 });
 
 /* ---------- merge captured list items ---------- */
@@ -91,11 +126,13 @@ function recordDiag(p) {
 chrome.runtime.onMessage.addListener((msg, sender) => {
   if (msg?.type === "refresh") { startRefresh(); return; }
   if (msg?.type === "refresh-done") {
-    chrome.storage.session.get("refreshWin").then(({ refreshWin }) => {
-      if (refreshWin && sender.tab?.windowId === refreshWin.id) {
-        // let pending captures finish first
-        queue = queue.then(() => finishRefresh((msg.payload?.ok ?? 0) > 0, "done"));
-      }
+    chrome.storage.session.get("refreshRun").then(({ refreshRun }) => {
+      if (!refreshRun || sender.tab?.id !== refreshRun.tabId || sender.frameId !== 0) return;
+      const ok = (msg.payload?.ok ?? 0) > 0;
+      // an already-open tab could not refresh (e.g. its sign-in expired): use a background tab
+      if (refreshRun.mode === "reuse" && !ok) { chrome.alarms.clear("refresh-timeout"); startTabRefresh(); return; }
+      // let pending captures finish first
+      queue = queue.then(() => finishRefresh(ok, "done"));
     });
     return;
   }
