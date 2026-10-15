@@ -467,6 +467,15 @@ th.num .sort-btn { justify-content: flex-end; }
 .org-head .org-refresh { width: 24px; height: 24px; }
 .org-head .org-refresh svg { width: 15px; height: 15px; }
 .org-loading { font-size: 12px; color: var(--ink-faint); }
+/* buttons at the right edge of a scrolling panel / the popup: keep the tooltip inside
+   (centered below, it overflowed the sidebar and caused a horizontal scrollbar) */
+.org-head .icon-btn[data-tip]::after {
+  top: 50% !important;
+  left: auto !important;
+  right: calc(100% + 6px);
+  transform: translateY(-50%) !important;
+}
+.popup-close[data-tip]::after { left: auto !important; right: 0; transform: none !important; }
 .org-empty p { margin: 8px 4px 0; font-size: 12.5px; color: var(--ink-soft); }
 .org-hint {
   margin: 10px 4px 0;
