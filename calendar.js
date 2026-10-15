@@ -668,7 +668,8 @@
       const known = new Set(state.org.nodes.map((n) => n.name));
       const others = depts.filter((d) => !known.has(d));
       sidebar = h("aside", { class: "org" },
-        h("div", { class: "org-head" }, h("h2", {}, state.org.company || "조직도"), clearBtn),
+        h("div", { class: "org-head" }, h("h2", {}, state.org.company || "조직도"),
+          h("div", { class: "org-head-actions" }, clearBtn, orgRefreshControl())),
         renderOrgTree(state.org, peopleByDept),
         // structure could not be read as a hierarchy -> show what the page looked like (no names)
         state.org.nodes.length > 3 && state.org.nodes.every((n) => !n.parent)
@@ -686,13 +687,12 @@
       // no org chart yet: same checkbox UI, as a flat list of departments found in the leave data
       const list = [...new Set([...depts, ...state.depts])].sort((a, b) => a.localeCompare(b, "ko"));
       sidebar = h("aside", { class: "org" },
-        h("div", { class: "org-head" }, h("h2", {}, "부서"), clearBtn),
+        h("div", { class: "org-head" }, h("h2", {}, "부서"),
+          h("div", { class: "org-head-actions" }, clearBtn, orgRefreshControl())),
         list.length
           ? h("ul", { class: "org-tree" }, list.map(deptRow))
           : h("p", { class: "org-hint-empty" }, "휴가 데이터가 들어오면 부서 목록이 표시됩니다."),
-        h("p", { class: "org-hint" }, "크롬에서 ",
-          h("a", { href: "https://teams.cloud.microsoft/", target: "_blank", rel: "noopener" }, "Teams 웹"),
-          "을 열고 조직도 탭을 한 번 누르면 상위 부서까지 트리로 볼 수 있어요. Teams 데스크톱 앱에서는 가져올 수 없어요."),
+        orgHint(),
       );
     }
 
@@ -896,6 +896,43 @@
   }
 
   let autoChecked = false;
+  /* ---------- org chart refresh (Teams org chart opened in a background tab) ---------- */
+
+  const ORG_STALE_MS = 7 * 24 * 3600e3; // refresh the department tree weekly
+  const orgRunning = () => state.orgRefresh?.status === "running" && Date.now() - state.orgRefresh.at < 2 * 60_000;
+
+  function requestOrgRefresh() {
+    state.orgRefresh = { status: "running", at: Date.now() };
+    render();
+    chrome.runtime.sendMessage({ type: "refresh-org" });
+  }
+
+  // small control in the sidebar header: refresh button, or a quiet "loading" label
+  function orgRefreshControl() {
+    if (orgRunning()) return h("span", { class: "org-loading" }, "조직도 불러오는 중…");
+    return iconButton("refresh", "조직도 갱신", { class: "org-refresh", onclick: () => requestOrgRefresh() });
+  }
+
+  // hint under the flat department list while there is no org chart yet
+  function orgHint() {
+    const teamsLink = h("a", { href: "https://teams.cloud.microsoft/", target: "_blank", rel: "noopener" }, "Teams 웹");
+    if (orgRunning()) return h("p", { class: "org-hint" }, "Teams에서 조직도를 불러오는 중이에요…");
+    if (state.orgRefresh?.status === "failed") {
+      return h("p", { class: "org-hint" }, "조직도를 자동으로 불러오지 못했어요. 크롬에서 ", teamsLink,
+        "에 로그인되어 있는지 확인한 뒤 ↻ 버튼을 눌러주세요.");
+    }
+    return h("p", { class: "org-hint" }, "↻ 버튼을 누르면 ", teamsLink, "에서 조직도를 불러와 상위 부서까지 트리로 보여줘요.");
+  }
+
+  let orgAutoChecked = false;
+  function maybeAutoRefreshOrg() {
+    if (orgAutoChecked) return;
+    orgAutoChecked = true;
+    const recentlyFailed = state.orgRefresh?.status === "failed" && Date.now() - state.orgRefresh.at < 60 * 60_000;
+    const stale = !state.org?.updatedAt || Date.now() - state.org.updatedAt > ORG_STALE_MS;
+    if (stale && !orgRunning() && !recentlyFailed) requestOrgRefresh();
+  }
+
   function maybeAutoRefresh() {
     if (autoChecked) return;
     autoChecked = true;
@@ -910,7 +947,8 @@
   }
 
   async function load() {
-    const store = await chrome.storage.local.get(["vacations", "holidays", "updatedAt", "diag", "orgTree", "refresh", "balance", "balances", "me"]);
+    const store = await chrome.storage.local.get(["vacations", "holidays", "updatedAt", "diag", "orgTree", "refresh", "balance", "balances", "me", "orgRefresh"]);
+    state.orgRefresh = store.orgRefresh ?? null;
     state.refresh = store.refresh ?? null;
     state.balance = store.balance ?? null;
     state.balances = store.balances ?? null;
@@ -933,5 +971,5 @@
   chrome.storage.onChanged.addListener((_changes, area) => { if (area === "local") load(); });
 
   checkAccess();
-  load().then(maybeAutoRefresh);
+  load().then(() => { maybeAutoRefresh(); maybeAutoRefreshOrg(); });
 })();

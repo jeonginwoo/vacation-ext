@@ -80,6 +80,48 @@ chrome.tabs.onRemoved.addListener(async (tabId) => {
   else finishRefresh(false, "closed");
 });
 
+/* ---------- org chart refresh ----------
+   Open the Teams org chart app (deep link straight to the app's tab) in a background tab;
+   orgchart.js reads the department tree inside it, then the tab is closed. */
+
+const ORG_URL = "https://teams.cloud.microsoft/_#/l/entity/e4b811fd-b165-4805-a3fa-e5403d507da9/orgchart";
+const ORG_TIMEOUT_MIN = 1.5;
+
+async function setOrgRefresh(status, extra = {}) {
+  await chrome.storage.local.set({ orgRefresh: { status, at: Date.now(), ...extra } });
+}
+
+async function startOrgRefresh() {
+  const { orgRun } = await chrome.storage.session.get("orgRun");
+  if (orgRun && Date.now() - orgRun.started < (ORG_TIMEOUT_MIN + 0.5) * 60_000) {
+    try { await chrome.tabs.get(orgRun.tabId); return; } catch { /* gone: start over */ }
+  }
+  let windowId;
+  try { windowId = (await chrome.windows.getLastFocused({ windowTypes: ["normal"] })).id; } catch {}
+  const tab = await chrome.tabs.create({ url: ORG_URL, active: false, ...(windowId != null ? { windowId } : {}) });
+  await chrome.storage.session.set({ orgRun: { tabId: tab.id, started: Date.now() } });
+  await setOrgRefresh("running");
+  chrome.alarms.create("org-timeout", { delayInMinutes: ORG_TIMEOUT_MIN });
+}
+
+async function finishOrgRefresh(ok, reason) {
+  const { orgRun } = await chrome.storage.session.get("orgRun");
+  if (!orgRun) return;
+  await chrome.storage.session.remove("orgRun");
+  chrome.alarms.clear("org-timeout");
+  try { await chrome.tabs.remove(orgRun.tabId); } catch {}
+  await setOrgRefresh(ok ? "done" : "failed", { reason });
+}
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === "org-timeout") finishOrgRefresh(false, "timeout");
+});
+
+chrome.tabs.onRemoved.addListener(async (tabId) => {
+  const { orgRun } = await chrome.storage.session.get("orgRun");
+  if (orgRun?.tabId === tabId) finishOrgRefresh(false, "closed");
+});
+
 /* ---------- merge captured list items ---------- */
 
 function merge(payload) {
@@ -125,6 +167,7 @@ function recordDiag(p) {
 
 chrome.runtime.onMessage.addListener((msg, sender) => {
   if (msg?.type === "refresh") { startRefresh(); return; }
+  if (msg?.type === "refresh-org") { startOrgRefresh(); return; }
   if (msg?.type === "refresh-done") {
     chrome.storage.session.get("refreshRun").then(({ refreshRun }) => {
       if (!refreshRun || sender.tab?.id !== refreshRun.tabId || sender.frameId !== 0) return;
@@ -162,6 +205,10 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
     queue = queue.then(() => chrome.storage.local.set({
       orgTree: { ...msg.payload, updatedAt: Date.now() },
     })).catch((err) => console.error(err));
+    // came from the background org chart tab we opened: done, close it
+    chrome.storage.session.get("orgRun").then(({ orgRun }) => {
+      if (orgRun && sender.tab?.id === orgRun.tabId) queue = queue.then(() => finishOrgRefresh(true, "done"));
+    });
   } else if (msg.type === "diag") {
     queue = queue.then(() => recordDiag(msg.payload)).catch((err) => console.error(err));
   }
