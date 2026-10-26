@@ -476,7 +476,9 @@
     h("button", {
       type: "button",
       onclick: () => {
-        state.year = now.getFullYear(); state.month = now.getMonth(); state.selected = toWeekday(today); render();
+        state.year = now.getFullYear(); state.month = now.getMonth(); state.selected = toWeekday(today);
+        calAutoTop = calEl.scrollTop; // even within the same month, bring today's week back up
+        render();
       },
     }, "오늘"),
     iconButton("next", "다음 달", { class: "nav-arrow", onclick: () => move(1) }),
@@ -546,6 +548,18 @@
     const top = oldEl.scrollTop;
     oldEl.replaceWith(newEl);
     if (keep && top) newEl.scrollTop = top;
+  }
+
+  // A busy month makes the calendar scroll; put today's week right under the pinned weekday
+  // header so it is not hidden below the fold. Returns the resulting scrollTop.
+  let calAutoTop = null; // scrollTop set by alignToday; differs once the user scrolls the calendar
+  function alignToday(cal) {
+    const week = cal.querySelector(".day-head.today:not(.outside)")?.closest(".week");
+    if (!week) return cal.scrollTop;
+    const header = cal.querySelector(".weekday-row")?.offsetHeight ?? 0;
+    const top = week.getBoundingClientRect().top - cal.getBoundingClientRect().top + cal.scrollTop - header;
+    cal.scrollTop = Math.max(0, top);
+    return cal.scrollTop;
   }
   app.replaceChildren(accessEl, layoutEl);
 
@@ -697,11 +711,14 @@
     }
 
     legendSlot.replaceChildren(...(legend ? [legend] : []));
-    // keep scroll positions; the calendar starts at the top only when the month changes,
-    // the day detail only when another day is selected
+    // keep scroll positions; the calendar jumps to today's week when the month changes (and keeps
+    // following it, e.g. as data arrives, until the user scrolls), the day detail resets only when
+    // another day is selected
     const monthKey = `${state.year}-${state.month}`;
     swapKeepingScroll(sideEl, sidebar, true); sideEl = sidebar;
-    swapKeepingScroll(calEl, calendar, monthKey === lastMonthKey); calEl = calendar;
+    const followToday = monthKey !== lastMonthKey || calEl.scrollTop === calAutoTop;
+    swapKeepingScroll(calEl, calendar, !followToday); calEl = calendar;
+    calAutoTop = followToday ? alignToday(calendar) : null;
     swapKeepingScroll(detailEl, detail, state.selected === lastSelected); detailEl = detail;
     lastMonthKey = monthKey;
     lastSelected = state.selected;
