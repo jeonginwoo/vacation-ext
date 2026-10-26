@@ -616,6 +616,16 @@ th.num .sort-btn { justify-content: flex-end; }
   );
 }
 
+/* previous / next month: drawn after (above) the bars, so dates and leave bars both fade;
+   clicks pass through to the cell and bars underneath */
+.outside-veil {
+  grid-row: 1 / -1;
+  z-index: 1;
+  margin-bottom: -6px;
+  background: color-mix(in srgb, var(--bg) 65%, transparent);
+  pointer-events: none;
+}
+
 .day-head {
   grid-row: 1;
   z-index: 1;

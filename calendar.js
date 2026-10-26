@@ -428,6 +428,11 @@
       ));
     }
 
+    // days of the previous / next month: a veil above the bars washes the whole column out
+    week.forEach((d, i) => {
+      if (d.getMonth() !== state.month) children.push(h("div", { class: "outside-veil", style: { "grid-column": String(i + 1) } }));
+    });
+
     return h("div", {
       class: "week",
       style: { "grid-template-rows": `auto repeat(${shownLanes}, 22px) auto 1fr` },
