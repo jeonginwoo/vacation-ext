@@ -404,7 +404,7 @@
     for (const seg of segs) {
       if (seg.lane >= MAX_LANES) continue;
       const sp = seg.sp;
-      const label = sp.half ?? sp.type;
+      const label = entryLabel(sp);
       const range = sp.start === sp.end ? sp.start : `${sp.start} ~ ${sp.end}`;
       children.push(h("button", {
         type: "button",
