@@ -89,6 +89,15 @@
     return e.half ? `${e.half} ${e.type}` : e.type;
   }
 
+  // 하루를 시간축 0~1로 보고 휴가가 차지하는 구간: 반반차는 1/4, 반차는 1/2, 그 외(연차·공가 등)는 하루 전체
+  function dayRange(e) {
+    const part = e.type.includes("반반차") ? 0.25 : e.type.includes("반차") ? 0.5 : 1;
+    if (part === 1) return [0, 1];
+    if (e.half?.includes("오후")) return [1 - part, 1];
+    if (e.half?.includes("오전")) return [0, part];
+    return [0, 1]; // 오전/오후 정보가 없으면 하루 전체
+  }
+
   // 주말이면 다음 월요일로
   function toWeekday(dateStr) {
     const d = new Date(dateStr + "T00:00:00");
@@ -306,33 +315,66 @@
     return cur;
   }
 
-  // 같은 사람·같은 구분(반차는 오전/오후까지)이 영업일 기준으로 이어지면 하나의 일정으로 묶습니다.
+  // 같은 사람의 휴가가 시간상으로 이어지면(전날이 하루 끝까지, 다음 영업일이 하루 시작부터) 하나의 일정으로 묶습니다.
+  // 예: 오후 반차 → 연차 → 오전 반차. 구분이 달라도 이어지며, 막대는 날마다 실제 쓴 시간대만 칠합니다.
   function buildSpans(list, holidays) {
     const groups = new Map();
     for (const e of list) {
-      const key = `${e.name}|${e.dept}|${e.type}|${e.half ?? ""}`;
-      const g = groups.get(key) ?? [];
-      g.push(e);
-      groups.set(key, g);
+      const key = `${e.name}|${e.dept}`;
+      const byDay = groups.get(key) ?? new Map();
+      const parts = byDay.get(e.date) ?? [];
+      const [f0, f1] = dayRange(e);
+      parts.push({ e, f0, f1 });
+      byDay.set(e.date, parts);
+      groups.set(key, byDay);
     }
     const spans = [];
-    for (const g of groups.values()) {
-      const byDay = new Map(g.map((e) => [e.date, e]));
-      const dates = [...byDay.keys()].sort();
+    for (const byDay of groups.values()) {
       let cur = null;
-      for (const date of dates) {
-        if (cur && nextBusinessDay(cur.end, holidays) === date) {
+      for (const date of [...byDay.keys()].sort()) {
+        const parts = byDay.get(date).sort((x, y) => x.f0 - y.f0);
+        const startsAt = parts[0].f0;
+        const endsAt = Math.max(...parts.map((p) => p.f1));
+        if (cur && cur.endsAt === 1 && startsAt === 0 && nextBusinessDay(cur.end, holidays) === date) {
           cur.end = date;
-          cur.days += 1;
+          cur.days.set(date, parts);
+          cur.endsAt = endsAt;
         } else {
-          const e = byDay.get(date);
-          cur = { ...e, id: e.id, start: date, end: date, days: 1 };
+          const e = parts[0].e;
+          cur = { name: e.name, dept: e.dept, start: date, end: date, days: new Map([[date, parts]]), endsAt };
           spans.push(cur);
         }
       }
     }
+    for (const sp of spans) {
+      const all = [...sp.days.values()].flat();
+      sp.labels = [...new Set(all.map((p) => entryLabel(p.e)))];
+      // 막대 테두리·글자색은 가장 많이 쓴 구분의 색
+      const amount = new Map();
+      for (const p of all) amount.set(p.e.type, (amount.get(p.e.type) ?? 0) + p.f1 - p.f0);
+      const isPart = (t) => t.includes("반차"); // 양이 같으면 종일 휴가 색을 우선
+      sp.type = [...amount].sort((x, y) => y[1] - x[1] || isPart(x[0]) - isPart(y[0]))[0][0];
+      sp.count = sp.days.size;
+    }
     // 긴 일정이 위로 오도록
-    return spans.sort((a, b) => a.start.localeCompare(b.start) || b.days - a.days || a.name.localeCompare(b.name, "ko"));
+    return spans.sort((a, b) => a.start.localeCompare(b.start) || b.count - a.count || a.name.localeCompare(b.name, "ko"));
+  }
+
+  // 막대 배경: 막대가 걸친 날마다 실제 쓴 시간대(f0~f1)만 그 구분의 색으로 칠하는 그라디언트.
+  // 첫날은 막대 왼쪽 끝, 마지막 날은 오른쪽 끝까지가 하루이고 그 사이는 칸 경계로 나눕니다(막대 여백 ml/mr 보정).
+  function barBackground(sp, dates, ml, mr) {
+    const n = dates.length;
+    const edge = (i) => (i === 0 ? "0%" : i === n ? "100%" : `(${i} * (100% + ${ml + mr}px) / ${n} - ${ml}px)`);
+    const at = (i, f) => `calc(${edge(i)} + ${f} * (${edge(i + 1)} - ${edge(i)}))`;
+    const stops = [];
+    dates.forEach((date, i) => {
+      for (const p of sp.days.get(date) ?? []) { // 사이에 낀 공휴일은 비워 둠
+        const c = `color-mix(in srgb, ${typeColor(p.e.type)} var(--fill-mix), var(--surface))`;
+        const a = at(i, p.f0), b = at(i, p.f1);
+        stops.push(`transparent ${a}`, `${c} ${a}`, `${c} ${b}`, `transparent ${b}`);
+      }
+    });
+    return stops.length ? `linear-gradient(to right, transparent 0%, ${stops.join(", ")})` : "none";
   }
 
   function renderWeek(week, spans, byDate, holidays) {
@@ -404,17 +446,20 @@
     for (const seg of segs) {
       if (seg.lane >= MAX_LANES) continue;
       const sp = seg.sp;
-      const label = entryLabel(sp);
+      const label = sp.labels.length > 1 ? sp.labels.join(" · ")
+        : sp.count > 1 && !seg.contL ? `${sp.labels[0]} ${sp.count}일` : sp.labels[0];
       const range = sp.start === sp.end ? sp.start : `${sp.start} ~ ${sp.end}`;
+      const detail = [...sp.days].map(([date, parts]) => `${date.slice(5)} ${parts.map((p) => entryLabel(p.e)).join(", ")}`);
       children.push(h("button", {
         type: "button",
         class: ["bar", seg.contL && "cont-left", seg.contR && "cont-right"].filter(Boolean).join(" "),
         style: {
           "--type-color": typeColor(sp.type),
+          "background-image": barBackground(sp, keys.slice(seg.s, seg.e + 1), seg.contL ? 0 : 6, seg.contR ? 0 : 6),
           "grid-column": `${seg.s + 1} / ${seg.e + 2}`,
           "grid-row": String(seg.lane + 2),
         },
-        title: `${sp.name} (${sp.dept}) ${entryLabel(sp)}, ${range}`,
+        title: `${sp.name} (${sp.dept}) ${range}\n${detail.join("\n")}`,
         // 막대를 누르면 누른 위치의 날짜를 선택
         onclick: (ev) => {
           const rect = ev.currentTarget.getBoundingClientRect();
@@ -424,7 +469,7 @@
         },
       },
         h("span", { class: "chip-name" }, sp.name),
-        h("span", { class: "chip-type" }, sp.days > 1 && !seg.contL ? `${label} ${sp.days}일` : label),
+        h("span", { class: "chip-type" }, label),
       ));
     }
 
