@@ -81,6 +81,8 @@
       .filter((w) => w.some((d) => d.getMonth() === month));
   }
 
+  const GAP_COLOR = "#9CA3AF"; // 일정 사이에 낀 공휴일 조각
+
   function typeColor(type) {
     return (TYPE_COLORS.find(([k]) => type.includes(k)) ?? [null, "#6B7280"])[1];
   }
@@ -346,15 +348,32 @@
         }
       }
     }
-    for (const sp of spans) {
-      const all = [...sp.days.values()].flat();
-      sp.labels = [...new Set(all.map((p) => entryLabel(p.e)))];
-      // 막대 테두리·글자색은 가장 많이 쓴 구분의 색
-      const amount = new Map();
-      for (const p of all) amount.set(p.e.type, (amount.get(p.e.type) ?? 0) + p.f1 - p.f0);
-      const isPart = (t) => t.includes("반차"); // 양이 같으면 종일 휴가 색을 우선
-      sp.type = [...amount].sort((x, y) => y[1] - x[1] || isPart(x[0]) - isPart(y[0]))[0][0];
+    // 한 일정 안에서 같은 성격(구분이 같음, 오전/오후는 무시)의 휴가가 이어지는 부분을 run으로 나눕니다.
+    // 예: 오후 반차 → 연차 3일 → 오전 반차 는 run 3개. 사이에 낀 공휴일은 run을 끊지 않습니다.
+    // 막대는 run마다 테두리·글자색을 따로 쓰고, run이 끝나는 위치에 그 run의 이름을 적습니다.
+    const isPart = (t) => t.includes("반차");
+    for (const [i, sp] of spans.entries()) {
+      sp.id = i;
       sp.count = sp.days.size;
+      sp.runOf = new Map();
+      const runs = [];
+      let run = null;
+      for (const [date, parts] of [...sp.days].sort((a, b) => a[0].localeCompare(b[0]))) {
+        const cat = [...new Set(parts.map((p) => p.e.type))].sort().join("|");
+        if (run?.cat !== cat) runs.push(run = { cat, start: date, parts: [], count: 0 });
+        run.parts.push(...parts);
+        run.count += 1;
+        run.end = date;
+        sp.runOf.set(date, run);
+      }
+      for (const r of runs) {
+        const labels = [...new Set(r.parts.map((p) => entryLabel(p.e)))];
+        r.label = labels.length > 1 ? labels.join(" · ") : r.count > 1 ? `${labels[0]} ${r.count}일` : labels[0];
+        // 한 run에 구분이 섞였으면(같은 날 반차+반반차 등) 가장 많이 쓴 구분의 색, 같으면 종일 휴가 색 우선
+        const amount = new Map();
+        for (const p of r.parts) amount.set(p.e.type, (amount.get(p.e.type) ?? 0) + p.f1 - p.f0);
+        r.type = [...amount].sort((x, y) => y[1] - x[1] || isPart(x[0]) - isPart(y[0]))[0][0];
+      }
     }
     // 긴 일정이 위로 오도록
     return spans.sort((a, b) => a.start.localeCompare(b.start) || b.count - a.count || a.name.localeCompare(b.name, "ko"));
@@ -443,34 +462,60 @@
       }
     });
 
+    // 한 일정에 속한 조각들은 함께 강조
+    const hoverSpan = (id, on) => {
+      for (const el of document.querySelectorAll(`.bar[data-span="${id}"]`)) el.classList.toggle("hover", on);
+    };
+
     for (const seg of segs) {
       if (seg.lane >= MAX_LANES) continue;
       const sp = seg.sp;
-      const label = sp.labels.length > 1 ? sp.labels.join(" · ")
-        : sp.count > 1 && !seg.contL ? `${sp.labels[0]} ${sp.count}일` : sp.labels[0];
       const range = sp.start === sp.end ? sp.start : `${sp.start} ~ ${sp.end}`;
       const detail = [...sp.days].map(([date, parts]) => `${date.slice(5)} ${parts.map((p) => entryLabel(p.e)).join(", ")}`);
-      children.push(h("button", {
-        type: "button",
-        class: ["bar", seg.contL && "cont-left", seg.contR && "cont-right"].filter(Boolean).join(" "),
-        style: {
-          "--type-color": typeColor(sp.type),
-          "background-image": barBackground(sp, keys.slice(seg.s, seg.e + 1), seg.contL ? 0 : 6, seg.contR ? 0 : 6),
-          "grid-column": `${seg.s + 1} / ${seg.e + 2}`,
-          "grid-row": String(seg.lane + 2),
+      const title = `${sp.name} (${sp.dept}) ${range}\n${detail.join("\n")}`;
+
+      // 이번 주 구간을 run(같은 성격의 휴가)과 사이에 낀 공휴일 단위 조각으로 나눔
+      const pieces = [];
+      for (let i = seg.s; i <= seg.e; i++) {
+        const run = sp.runOf.get(keys[i]) ?? null; // null: 사이에 낀 공휴일
+        const last = pieces[pieces.length - 1];
+        if (last && last.run === run) last.e = i;
+        else pieces.push({ run, s: i, e: i });
+      }
+      // run 이름은 이번 주에서 그 run이 마지막으로 나오는 조각(=run이 끝나는 위치)에 적음
+      const lastPiece = new Map();
+      for (const p of pieces) if (p.run) lastPiece.set(p.run, p);
+      // 이름은 회색(공휴일) 조각을 건너뛰고 첫 휴가 조각에 적음
+      const namePiece = pieces.find((p) => p.run) ?? pieces[0];
+
+      pieces.forEach((p, k) => {
+        const contL = k > 0 || seg.contL, contR = k < pieces.length - 1 || seg.contR;
+        const gap = !p.run;
+        children.push(h("button", {
+          type: "button",
+          class: ["bar", gap && "gap", contL && "cont-left", contR && "cont-right"].filter(Boolean).join(" "),
+          "data-span": sp.id,
+          style: {
+            "--type-color": gap ? GAP_COLOR : typeColor(p.run.type),
+            "background-image": gap ? null : barBackground(sp, keys.slice(p.s, p.e + 1), contL ? 0 : 6, contR ? 0 : 6),
+            "grid-column": `${p.s + 1} / ${p.e + 2}`,
+            "grid-row": String(seg.lane + 2),
+          },
+          title,
+          onmouseenter: () => hoverSpan(sp.id, true),
+          onmouseleave: () => hoverSpan(sp.id, false),
+          // 막대를 누르면 누른 위치의 날짜를 선택
+          onclick: (ev) => {
+            const rect = ev.currentTarget.getBoundingClientRect();
+            const cols = p.e - p.s + 1;
+            const idx = Math.min(cols - 1, Math.max(0, Math.floor(((ev.clientX - rect.left) / rect.width) * cols)));
+            select(keys[p.s + idx]);
+          },
         },
-        title: `${sp.name} (${sp.dept}) ${range}\n${detail.join("\n")}`,
-        // 막대를 누르면 누른 위치의 날짜를 선택
-        onclick: (ev) => {
-          const rect = ev.currentTarget.getBoundingClientRect();
-          const cols = seg.e - seg.s + 1;
-          const idx = Math.min(cols - 1, Math.max(0, Math.floor(((ev.clientX - rect.left) / rect.width) * cols)));
-          select(keys[seg.s + idx]);
-        },
-      },
-        h("span", { class: "chip-name" }, sp.name),
-        h("span", { class: "chip-type" }, label),
-      ));
+          p === namePiece ? h("span", { class: "chip-name" }, sp.name) : null,
+          p.run && lastPiece.get(p.run) === p ? h("span", { class: "chip-type" }, p.run.label) : null,
+        ));
+      });
     }
 
     // days of the previous / next month: a veil above the bars washes the whole column out
