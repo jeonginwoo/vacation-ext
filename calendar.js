@@ -83,6 +83,13 @@
 
   const GAP_COLOR = "#9CA3AF"; // 일정 사이에 낀 공휴일 조각
 
+  // 이름·부서 검색: 대소문자 구분 없이 부분 일치
+  function matchesQuery(q, ...fields) {
+    if (!q) return true;
+    const needle = q.toLowerCase();
+    return fields.some((f) => (f ?? "").toLowerCase().includes(needle));
+  }
+
   function typeColor(type) {
     return (TYPE_COLORS.find(([k]) => type.includes(k)) ?? [null, "#6B7280"])[1];
   }
@@ -134,6 +141,7 @@
     prev: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>',
     next: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>',
     trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16"/><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>',
+    search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>',
   };
   function iconButton(icon, tip, props = {}) {
     const btn = h("button", { type: "button", class: `icon-btn ${props.class ?? ""}`.trim(), "aria-label": tip, "data-tip": tip,
@@ -583,7 +591,9 @@
   //   above the org chart  -> search
   //   above the calendar   -> month title + collection status (left), month navigation (right)
   //   above the day detail -> leave-type checkboxes
-  const searchWrap = h("div", { class: "search-wrap" }, searchInput);
+  const searchIcon = h("span", { class: "search-icon" });
+  searchIcon.innerHTML = ICONS.search;
+  const searchWrap = h("div", { class: "search-wrap" }, searchIcon, searchInput);
   const headEl = h("div", { class: "calendar-head" },
     h("div", { class: "calendar-head-left" }, titleEl, metaEl),
     navEl,
@@ -670,7 +680,7 @@
     const q = state.query.trim();
     // 검색/필터는 전체 기간에 적용 (달을 넘나드는 일정도 일수가 정확하도록)
     const base = entries.filter((e) =>
-      (!q || e.name.includes(q) || e.dept.includes(q)) &&
+      matchesQuery(q, e.name, e.dept) &&
       !state.hiddenTypes.has(e.type)
     );
     const deptSet = effectiveDepts(state.org, state.depts);
@@ -950,7 +960,7 @@
     const q = popup.query.trim();
     const rows = people.filter((p) =>
       (popup.depts.size === 0 || deptSet.has(p.dept)) &&
-      (!q || p.name.includes(q) || p.dept.includes(q)));
+      matchesQuery(q, p.name, p.dept));
     const { key, dir } = popup.sort;
     // departments follow the org chart order; "no department" always last
     const deptOrder = new Map((state.org?.nodes ?? []).map((n, i) => [n.name, i]));
